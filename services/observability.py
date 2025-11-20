@@ -198,9 +198,21 @@ class ObservabilityService:
 class RequestTracingMiddleware(BaseHTTPMiddleware):
     """Middleware for tracing and timing all requests"""
     
-    def __init__(self, app, observability_service: ObservabilityService):
+    def __init__(self, app, observability_service: ObservabilityService = None):
         super().__init__(app)
         self.observability = observability_service
+    
+    def _get_observability(self, request: Request):
+        """Get observability service from app state or instance"""
+        if self.observability:
+            return self.observability
+        # Try to get from app state via request
+        try:
+            if hasattr(request.app.state, 'observability'):
+                return request.app.state.observability
+        except:
+            pass
+        return None
     
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         # Generate request ID
@@ -224,14 +236,16 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
             user_id = request.headers.get("X-User-ID")
             
             # Log request completion
-            self.observability.log_request(
-                request_id=request_id,
-                method=request.method,
-                path=request.url.path,
-                duration_ms=duration_ms,
-                status_code=response.status_code,
-                user_id=user_id
-            )
+            observability = self._get_observability(request)
+            if observability:
+                observability.log_request(
+                    request_id=request_id,
+                    method=request.method,
+                    path=request.url.path,
+                    duration_ms=duration_ms,
+                    status_code=response.status_code,
+                    user_id=user_id
+                )
             
             # Add tracing headers to response
             response.headers["X-Request-ID"] = request_id
@@ -243,16 +257,18 @@ class RequestTracingMiddleware(BaseHTTPMiddleware):
             duration_ms = (time.time() - start_time) * 1000
             
             # Log error
-            self.observability.log_error(
-                error_type=type(e).__name__,
-                error_message=str(e),
-                context={
-                    "request_id": request_id,
-                    "method": request.method,
-                    "path": request.url.path,
-                    "duration_ms": duration_ms
-                }
-            )
+            observability = self._get_observability(request)
+            if observability:
+                observability.log_error(
+                    error_type=type(e).__name__,
+                    error_message=str(e),
+                    context={
+                        "request_id": request_id,
+                        "method": request.method,
+                        "path": request.url.path,
+                        "duration_ms": duration_ms
+                    }
+                )
             
             # Re-raise to let FastAPI handle it
             raise

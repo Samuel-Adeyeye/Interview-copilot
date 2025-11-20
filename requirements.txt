@@ -28,3 +28,9 @@ prometheus-client>=0.21.0
 
 # Optional: Redis for session state
 redis>=5.0.0
+
+# UI Dependencies
+plotly>=5.18.0
+pandas>=2.0.0
+streamlit-ace>=0.1.1
+nest-asyncio>=1.6.0

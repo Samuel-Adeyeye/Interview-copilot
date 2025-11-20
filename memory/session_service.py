@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 from enum import Enum
 import json
@@ -78,3 +78,89 @@ class InMemorySessionService:
     def get_session(self, session_id: str) -> Optional[Dict]:
         """Retrieve session"""
         return self.sessions.get(session_id)
+    
+    def get_all_user_sessions(self, user_id: str) -> List[Dict]:
+        """
+        Get all sessions for a specific user
+        
+        Args:
+            user_id: User identifier
+        
+        Returns:
+            List of session dictionaries
+        """
+        user_sessions = [
+            session for session in self.sessions.values()
+            if session.get("user_id") == user_id
+        ]
+        # Sort by created_at (most recent first)
+        user_sessions.sort(
+            key=lambda x: x.get("created_at", ""),
+            reverse=True
+        )
+        return user_sessions
+    
+    def delete_session(self, session_id: str) -> bool:
+        """
+        Delete a session
+        
+        Args:
+            session_id: Session identifier
+        
+        Returns:
+            True if session was deleted, False if not found
+        """
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+            return True
+        return False
+    
+    def update_session_metadata(self, session_id: str, metadata: Dict):
+        """
+        Update session metadata
+        
+        Args:
+            session_id: Session identifier
+            metadata: Dictionary of metadata to update (will be merged with existing)
+        """
+        if session_id in self.sessions:
+            existing_metadata = self.sessions[session_id].get("metadata", {})
+            existing_metadata.update(metadata)
+            self.sessions[session_id]["metadata"] = existing_metadata
+            self.sessions[session_id]["updated_at"] = datetime.utcnow().isoformat()
+    
+    def get_session_count(self) -> int:
+        """Get total number of sessions"""
+        return len(self.sessions)
+    
+    def get_active_sessions(self) -> List[Dict]:
+        """Get all active (running) sessions"""
+        return [
+            session for session in self.sessions.values()
+            if session.get("state") == SessionState.RUNNING
+        ]
+    
+    def cleanup_expired_sessions(self, max_age_hours: int = 24):
+        """
+        Remove sessions older than max_age_hours
+        
+        Args:
+            max_age_hours: Maximum age in hours before session is considered expired
+        """
+        from datetime import datetime, timedelta
+        cutoff_time = datetime.utcnow() - timedelta(hours=max_age_hours)
+        
+        expired_sessions = []
+        for session_id, session in list(self.sessions.items()):
+            created_at_str = session.get("created_at", "")
+            try:
+                created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                if created_at < cutoff_time:
+                    expired_sessions.append(session_id)
+            except:
+                pass
+        
+        for session_id in expired_sessions:
+            del self.sessions[session_id]
+        
+        return len(expired_sessions)

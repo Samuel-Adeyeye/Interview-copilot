@@ -23,7 +23,7 @@ from memory.session_service import InMemorySessionService
 from tools.search_tool import create_search_tool
 from tools.code_exec_tool import create_code_exec_tool
 from tools.question_bank import QuestionBank
-from services.observability import ObservabilityService
+from services.observability import ObservabilityService, RequestTracingMiddleware, RateLimitMiddleware
 from config.settings import settings
 
 # Configure logging
@@ -269,6 +269,10 @@ async def lifespan(app: FastAPI):
         
         logger.info("✅ Health checks passed")
         
+        # Store observability in app state for middleware access
+        app.state.observability = app_state.observability
+        logger.info("✅ Observability service stored in app state")
+        
     except Exception as e:
         logger.error(f"❌ Failed to initialize services: {e}")
         app_state.initialized = False
@@ -310,6 +314,19 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Observability middleware (request tracing)
+# This will use app_state.observability which is initialized in lifespan
+app.add_middleware(
+    RequestTracingMiddleware,
+    observability_service=None  # Will be set dynamically, but middleware checks for None
+)
+
+# Rate limiting middleware
+app.add_middleware(
+    RateLimitMiddleware,
+    max_requests_per_minute=100
 )
 
 
@@ -506,36 +523,47 @@ async def run_research(
         
         logger.info(f"Starting research for session {request.session_id}")
         
-        # Execute research agent through orchestrator
-        # result = await orchestrator.execute_research({
-        #     "session_id": request.session_id,
-        #     "job_description": request.job_description,
-        #     "company_name": request.company_name
-        # })
+        # Get user_id from session
+        user_id = session.get("user_id")
+        if not user_id:
+            raise HTTPException(status_code=400, detail="Session missing user_id")
         
-        # Mock response for now
+        # Execute research agent through orchestrator
+        research_result = await orchestrator.execute_research(
+            session_id=request.session_id,
+            user_id=user_id,
+            job_description=request.job_description,
+            company_name=request.company_name
+        )
+        
+        if not research_result.get("success"):
+            error_msg = research_result.get("error", "Research agent failed")
+            logger.error(f"Research failed: {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
+        
+        # Extract research packet from result
+        research_output = research_result.get("output", {})
+        if not research_output:
+            raise HTTPException(status_code=500, detail="Research agent returned empty output")
+        
+        # Format response
         result = {
             "session_id": request.session_id,
             "company_name": request.company_name,
-            "research_packet": {
-                "company_overview": "Tech company focused on AI/ML",
-                "interview_process": "3 rounds: phone screen, technical, behavioral",
-                "tech_stack": ["Python", "React", "AWS"],
-                "recent_news": ["Launched new AI product", "Series B funding"]
-            },
-            "insights": [
-                "Focus on system design patterns",
-                "Prepare examples of ML projects",
-                "Company values innovation and speed"
-            ],
-            "execution_time_ms": 1500.0
+            "research_packet": research_output,
+            "insights": research_output.get("preparation_tips", []),
+            "execution_time_ms": research_result.get("execution_time_ms", 0.0)
         }
         
         # Update session
         session_service.update_agent_state(
             request.session_id,
             "research",
-            {"status": "completed", "result": result}
+            {
+                "status": "completed",
+                "result": result,
+                "execution_time_ms": research_result.get("execution_time_ms", 0.0)
+            }
         )
         
         return ResearchResponse(**result)
@@ -565,42 +593,38 @@ async def start_mock_interview(
         
         logger.info(f"Starting mock interview for session {request.session_id}")
         
-        # Execute technical agent to select questions
-        # questions = await orchestrator.execute_technical({
-        #     "session_id": request.session_id,
-        #     "mode": "select_questions",
-        #     "difficulty": request.difficulty,
-        #     "num_questions": request.num_questions
-        # })
+        # Get user_id and job description from session
+        user_id = session.get("user_id")
+        if not user_id:
+            raise HTTPException(status_code=400, detail="Session missing user_id")
         
-        # Mock questions for now
-        questions = [
-            {
-                "id": "q1",
-                "title": "Two Sum",
-                "difficulty": "easy",
-                "description": "Given an array of integers nums and an integer target, return indices of the two numbers that add up to target.",
-                "examples": [
-                    {"input": "[2,7,11,15], target=9", "output": "[0,1]"}
-                ],
-                "test_cases": [
-                    {"input": "[2,7,11,15]\n9", "expected_output": "[0, 1]"},
-                    {"input": "[3,2,4]\n6", "expected_output": "[1, 2]"}
-                ]
-            },
-            {
-                "id": "q2",
-                "title": "Valid Parentheses",
-                "difficulty": "easy",
-                "description": "Given a string containing just the characters '(', ')', '{', '}', '[' and ']', determine if the input string is valid."
-            },
-            {
-                "id": "q3",
-                "title": "Merge Intervals",
-                "difficulty": "medium",
-                "description": "Given an array of intervals, merge all overlapping intervals."
-            }
-        ]
+        # Get job description from research results if available
+        agent_states = session.get("agent_states", {})
+        research_state = agent_states.get("research", {})
+        research_result = research_state.get("result", {})
+        job_description = research_result.get("research_packet", {}).get("company_overview", "")
+        
+        # Execute technical agent to select questions
+        technical_result = await orchestrator.execute_technical(
+            session_id=request.session_id,
+            user_id=user_id,
+            mode="select_questions",
+            job_description=job_description,
+            difficulty=request.difficulty,
+            num_questions=request.num_questions
+        )
+        
+        if not technical_result.get("success"):
+            error_msg = technical_result.get("error", "Technical agent failed")
+            logger.error(f"Technical agent failed: {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
+        
+        # Extract questions from result
+        tech_output = technical_result.get("output", {})
+        questions = tech_output.get("questions", [])
+        
+        if not questions:
+            raise HTTPException(status_code=500, detail="No questions selected")
         
         # Update session
         session_service.update_agent_state(
@@ -609,7 +633,8 @@ async def start_mock_interview(
             {
                 "status": "in_progress",
                 "questions": questions,
-                "current_question": 0
+                "current_question": 0,
+                "execution_time_ms": technical_result.get("execution_time_ms", 0.0)
             }
         )
         
@@ -643,44 +668,56 @@ async def submit_code(
         
         logger.info(f"Evaluating code submission for session {request.session_id}, question {request.question_id}")
         
-        # Execute technical agent with code execution tool
-        # evaluation = await orchestrator.execute_technical({
-        #     "session_id": request.session_id,
-        #     "mode": "evaluate_code",
-        #     "question_id": request.question_id,
-        #     "code": request.code,
-        #     "language": request.language
-        # })
+        # Get user_id from session
+        user_id = session.get("user_id")
+        if not user_id:
+            raise HTTPException(status_code=400, detail="Session missing user_id")
         
-        # Mock evaluation for now
-        evaluation = {
-            "session_id": request.session_id,
-            "question_id": request.question_id,
-            "status": "success",
-            "tests_passed": 2,
-            "total_tests": 2,
-            "feedback": """
-Great job! Your solution is correct and handles all test cases.
-
-Strengths:
-- Clean and readable code
-- Correct algorithmic approach
-- Good variable naming
-
-Complexity Analysis:
-- Time: O(n) - single pass through array
-- Space: O(n) - hash map storage
-
-Suggestions for improvement:
-- Consider edge cases like empty arrays
-- Add input validation
-            """.strip(),
-            "complexity_analysis": {
-                "time": "O(n)",
-                "space": "O(n)"
-            },
-            "execution_time_ms": 850.0
-        }
+        # Execute technical agent with code execution tool
+        technical_result = await orchestrator.execute_technical(
+            session_id=request.session_id,
+            user_id=user_id,
+            mode="evaluate_code",
+            question_id=request.question_id,
+            code=request.code,
+            language=request.language
+        )
+        
+        if not technical_result.get("success"):
+            error_msg = technical_result.get("error", "Code evaluation failed")
+            logger.error(f"Code evaluation failed: {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
+        
+        # Extract evaluation from result
+        tech_output = technical_result.get("output", {})
+        
+        # Format evaluation response
+        # The output format depends on how TechnicalAgent returns evaluation results
+        # If it's a string, parse it; if it's a dict, use it directly
+        if isinstance(tech_output, str):
+            # If output is a string (from agent), create a basic evaluation
+            evaluation = {
+                "session_id": request.session_id,
+                "question_id": request.question_id,
+                "status": "success",
+                "tests_passed": 0,
+                "total_tests": 0,
+                "feedback": tech_output,
+                "complexity_analysis": None,
+                "execution_time_ms": technical_result.get("execution_time_ms", 0.0)
+            }
+        else:
+            # If output is a dict, use it
+            evaluation = {
+                "session_id": request.session_id,
+                "question_id": request.question_id,
+                "status": tech_output.get("status", "success"),
+                "tests_passed": tech_output.get("tests_passed", tech_output.get("testsPassed", 0)),
+                "total_tests": tech_output.get("total_tests", tech_output.get("totalTests", 0)),
+                "feedback": tech_output.get("feedback", ""),
+                "complexity_analysis": tech_output.get("complexity_analysis"),
+                "execution_time_ms": technical_result.get("execution_time_ms", 0.0)
+            }
         
         # Store submission in session
         session_service.add_artifact(
@@ -715,41 +752,8 @@ async def get_user_progress(
     Get user's progress and session history
     """
     try:
-        # history = await memory_bank.get_user_history(user_id, limit=10)
-        
-        # Mock progress data
-        progress = {
-            "user_id": user_id,
-            "total_sessions": 5,
-            "questions_attempted": 15,
-            "questions_solved": 12,
-            "success_rate": 0.80,
-            "avg_execution_time": 45.5,
-            "recent_sessions": [
-                {
-                    "session_id": "session_1",
-                    "date": "2025-11-15",
-                    "company": "Google",
-                    "questions_solved": 2,
-                    "total_questions": 3,
-                    "score": 66.7
-                },
-                {
-                    "session_id": "session_2",
-                    "date": "2025-11-17",
-                    "company": "Amazon",
-                    "questions_solved": 3,
-                    "total_questions": 3,
-                    "score": 100.0
-                }
-            ],
-            "skills_progress": {
-                "arrays": {"attempted": 5, "solved": 4, "proficiency": 0.8},
-                "strings": {"attempted": 4, "solved": 3, "proficiency": 0.75},
-                "dynamic_programming": {"attempted": 3, "solved": 2, "proficiency": 0.67},
-                "graphs": {"attempted": 3, "solved": 3, "proficiency": 1.0}
-            }
-        }
+        # Get real progress from memory bank
+        progress = await memory_bank.get_user_progress(user_id)
         
         return progress
     
@@ -771,18 +775,46 @@ async def get_session_summary(
         if not session:
             raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
         
+        # Calculate duration from timestamps
+        duration_minutes = 0
+        created_at = session.get("created_at")
+        completed_at = session.get("completed_at") or session.get("updated_at")
+        
+        if created_at and completed_at:
+            try:
+                from datetime import datetime
+                start = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                end = datetime.fromisoformat(completed_at.replace('Z', '+00:00'))
+                duration_minutes = (end - start).total_seconds() / 60
+            except Exception as e:
+                logger.warning(f"Error calculating duration: {e}")
+        
+        # Count questions attempted and solved
+        code_submissions = [a for a in session.get("artifacts", []) if a.get("type") == "code_submission"]
+        questions_attempted = len(code_submissions)
+        questions_solved = sum(
+            1 for a in code_submissions
+            if a.get("payload", {}).get("evaluation", {}).get("status") == "success"
+            or a.get("payload", {}).get("evaluation", {}).get("tests_passed", 0) > 0
+        )
+        
+        # Get research insights
+        agent_states = session.get("agent_states", {})
+        research_state = agent_states.get("research", {})
+        research_result = research_state.get("result", {})
+        
         # Compile summary from session data
         summary = {
             "session_id": session_id,
             "user_id": session["user_id"],
-            "state": session["state"],
-            "duration_minutes": 45,  # Calculate from timestamps
-            "research_insights": session.get("agent_states", {}).get("research", {}),
-            "questions_attempted": len([a for a in session["artifacts"] if a["type"] == "code_submission"]),
-            "questions_solved": 2,  # Calculate from artifacts
-            "artifacts": session["artifacts"],
-            "created_at": session["created_at"],
-            "completed_at": session.get("completed_at")
+            "state": str(session.get("state", "")),
+            "duration_minutes": round(duration_minutes, 1),
+            "research_insights": research_result.get("research_packet", {}),
+            "questions_attempted": questions_attempted,
+            "questions_solved": questions_solved,
+            "artifacts": session.get("artifacts", []),
+            "created_at": created_at,
+            "completed_at": completed_at
         }
         
         return summary
@@ -802,46 +834,50 @@ async def get_metrics():
     Get system metrics for observability
     """
     try:
-        # In production, this would pull from Prometheus or similar
-        metrics = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "system": {
-                "total_sessions": 25,
-                "active_sessions": 3,
-                "completed_sessions": 22
-            },
-            "agents": {
-                "research_agent": {
-                    "total_calls": 25,
-                    "avg_latency_ms": 1250.5,
-                    "success_rate": 0.96
+        # Get real metrics from observability service
+        if app_state.observability:
+            observability_metrics = app_state.observability.get_metrics()
+            
+            # Count sessions from session service
+            total_sessions = 0
+            active_sessions = 0
+            completed_sessions = 0
+            
+            if app_state.session_service:
+                all_sessions = app_state.session_service.sessions
+                total_sessions = len(all_sessions)
+                for session in all_sessions.values():
+                    state = str(session.get("state", ""))
+                    if state == "running" or state == "created":
+                        active_sessions += 1
+                    elif state == "completed":
+                        completed_sessions += 1
+            
+            # Format metrics response
+            metrics = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "system": {
+                    "total_sessions": total_sessions,
+                    "active_sessions": active_sessions,
+                    "completed_sessions": completed_sessions
                 },
-                "technical_agent": {
-                    "total_calls": 75,
-                    "avg_latency_ms": 850.3,
-                    "success_rate": 0.93
-                },
-                "companion_agent": {
-                    "total_calls": 25,
-                    "avg_latency_ms": 500.2,
-                    "success_rate": 0.98
-                }
-            },
-            "tools": {
-                "code_execution": {
-                    "total_executions": 75,
-                    "avg_execution_time_ms": 120.5,
-                    "success_rate": 0.89
-                },
-                "web_search": {
-                    "total_searches": 50,
-                    "avg_search_time_ms": 800.3,
-                    "success_rate": 0.94
-                }
+                "agents": observability_metrics.get("agents", {}),
+                "tools": observability_metrics.get("tools", {})
             }
-        }
-        
-        return metrics
+            
+            return metrics
+        else:
+            # Fallback if observability service not available
+            return {
+                "timestamp": datetime.utcnow().isoformat(),
+                "system": {
+                    "total_sessions": 0,
+                    "active_sessions": 0,
+                    "completed_sessions": 0
+                },
+                "agents": {},
+                "tools": {}
+            }
     
     except Exception as e:
         logger.error(f"Error retrieving metrics: {str(e)}")
@@ -849,38 +885,70 @@ async def get_metrics():
 
 
 @app.get("/sessions/{session_id}/traces")
-async def get_session_traces(session_id: str):
+async def get_session_traces(
+    session_id: str,
+    session_service = Depends(get_session_service)
+):
     """
     Get detailed traces for a session (for observability)
     """
     try:
-        # Mock trace data - in production, pull from logging/tracing system
+        session = session_service.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        
+        # Extract traces from session agent states
+        agent_states = session.get("agent_states", {})
+        traces_list = []
+        
+        # Research agent trace
+        if "research" in agent_states:
+            research_state = agent_states["research"]
+            traces_list.append({
+                "trace_id": research_state.get("result", {}).get("trace_id", f"research_{session_id}"),
+                "agent": "research_agent",
+                "start_time": session.get("created_at", ""),
+                "end_time": research_state.get("result", {}).get("timestamp", ""),
+                "duration_ms": research_state.get("execution_time_ms", 0),
+                "status": "success" if research_state.get("status") == "completed" else "failed",
+                "tools_used": ["web_search"],
+                "input_hash": "",
+                "output_size_bytes": 0
+            })
+        
+        # Technical agent trace
+        if "technical" in agent_states:
+            tech_state = agent_states["technical"]
+            traces_list.append({
+                "trace_id": tech_state.get("result", {}).get("trace_id", f"technical_{session_id}"),
+                "agent": "technical_agent",
+                "start_time": tech_state.get("timestamp", ""),
+                "end_time": session.get("updated_at", ""),
+                "duration_ms": tech_state.get("execution_time_ms", 0),
+                "status": "success" if tech_state.get("status") == "completed" else "failed",
+                "tools_used": ["code_executor"],
+                "input_hash": "",
+                "output_size_bytes": 0
+            })
+        
+        # Companion agent trace
+        if "companion" in agent_states:
+            companion_state = agent_states["companion"]
+            traces_list.append({
+                "trace_id": companion_state.get("result", {}).get("trace_id", f"companion_{session_id}"),
+                "agent": "companion_agent",
+                "start_time": companion_state.get("timestamp", ""),
+                "end_time": session.get("updated_at", ""),
+                "duration_ms": companion_state.get("execution_time_ms", 0),
+                "status": "success" if companion_state.get("status") == "completed" else "failed",
+                "tools_used": [],
+                "input_hash": "",
+                "output_size_bytes": 0
+            })
+        
         traces = {
             "session_id": session_id,
-            "traces": [
-                {
-                    "trace_id": "trace_1",
-                    "agent": "research_agent",
-                    "start_time": "2025-11-18T10:30:00Z",
-                    "end_time": "2025-11-18T10:30:01.5Z",
-                    "duration_ms": 1500,
-                    "status": "success",
-                    "tools_used": ["web_search"],
-                    "input_hash": "abc123",
-                    "output_size_bytes": 2048
-                },
-                {
-                    "trace_id": "trace_2",
-                    "agent": "technical_agent",
-                    "start_time": "2025-11-18T10:31:00Z",
-                    "end_time": "2025-11-18T10:31:00.85Z",
-                    "duration_ms": 850,
-                    "status": "success",
-                    "tools_used": ["code_executor"],
-                    "input_hash": "def456",
-                    "output_size_bytes": 1024
-                }
-            ]
+            "traces": traces_list
         }
         
         return traces

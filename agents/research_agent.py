@@ -1,4 +1,5 @@
-from langchain.agents import AgentExecutor, create_openai_tools_agent
+# Note: AgentExecutor and create_openai_tools_agent are not used in this implementation
+# We use langgraph.prebuilt.create_react_agent instead
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -52,8 +53,29 @@ class ResearchAgentStructured(BaseAgent):
     
     def __init__(self, llm: ChatOpenAI, memory_bank):
         from langgraph.prebuilt import create_react_agent
+        import os
         
-        search_tool = TavilySearchResults(max_results=5, search_depth="advanced")
+        # Create search tool with proper API key handling
+        try:
+            tavily_api_key = os.getenv("TAVILY_API_KEY")
+            if tavily_api_key:
+                search_tool = TavilySearchResults(
+                    api_key=tavily_api_key,
+                    max_results=5,
+                    search_depth="advanced"
+                )
+            else:
+                # Create a mock tool if API key is missing
+                from langchain_core.tools import Tool
+                def mock_search(query: str) -> str:
+                    return f"Mock search: {query}. Tavily API key not configured."
+                search_tool = Tool(name="web_search", description="Mock search", func=mock_search)
+        except Exception as e:
+            logger.warning(f"Failed to create Tavily search tool: {e}")
+            from langchain_core.tools import Tool
+            def mock_search(query: str) -> str:
+                return f"Mock search: {query}. Search tool unavailable."
+            search_tool = Tool(name="web_search", description="Mock search", func=mock_search)
         
         super().__init__("ResearchAgent", llm, tools=[search_tool])
         self.memory_bank = memory_bank
@@ -62,10 +84,11 @@ class ResearchAgentStructured(BaseAgent):
         self.structured_llm = llm.with_structured_output(ResearchPacket)
         
         # Create ReAct agent for research
+        # Use prompt parameter for system instructions
         self.research_agent = create_react_agent(
             llm,
             [search_tool],
-            state_modifier="You are a research assistant. Search the web to gather information about companies and their interview processes."
+            prompt="You are a research assistant. Search the web to gather information about companies and their interview processes."
         )
     
     async def run(self, context: AgentContext) -> AgentResult:

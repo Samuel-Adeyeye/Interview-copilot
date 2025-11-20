@@ -1,34 +1,17 @@
 from agents.base_agent import BaseAgent, AgentContext, AgentResult
-from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import HumanMessage
 import json
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 class TechnicalAgent(BaseAgent):
     def __init__(self, llm, code_exec_tool, question_bank):
-        super().__init__("TechnicalAgent", llm, tools=[code_exec_tool])
+        super().__init__("TechnicalAgent", llm, tools=[code_exec_tool] if code_exec_tool else [])
         self.code_exec_tool = code_exec_tool
         self.question_bank = question_bank
-        self.agent = self._create_agent()
-    
-    def _create_agent(self):
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a technical interviewer conducting coding interviews.
-            
-            Your role:
-            1. Select appropriate coding questions based on the job requirements
-            2. Present questions clearly with examples
-            3. Execute user's code using the code execution tool
-            4. Provide detailed feedback on correctness, time/space complexity, and code quality
-            5. Suggest improvements
-            
-            Be encouraging but thorough in your evaluation."""),
-            ("human", "{input}"),
-            ("placeholder", "{agent_scratchpad}"),
-        ])
-        
-        agent = create_openai_tools_agent(self.llm, self.tools, prompt)
-        return AgentExecutor(agent=agent, tools=self.tools, verbose=True)
     
     def select_questions(self, jd_text: str, difficulty: str = "medium", count: int = 3):
         """Select questions from bank based on JD requirements"""
@@ -53,24 +36,71 @@ class TechnicalAgent(BaseAgent):
                 user_code = context.inputs.get("code")
                 language = context.inputs.get("language", "python")
                 
-                # Use agent to evaluate
-                result = await self.agent.ainvoke({
-                    "input": f"""Evaluate this code submission:
-                    
-                    Question ID: {question_id}
-                    Language: {language}
-                    Code:
-```{language}
-                    {user_code}
-```
-                    
-                    1. Execute the code using the code execution tool
-                    2. Check if it passes test cases
-                    3. Analyze time and space complexity
-                    4. Provide constructive feedback"""
-                })
+                # Get question details
+                question = self.question_bank.get_question_by_id(question_id)
+                test_cases = question.get("test_cases", []) if question else []
                 
-                output = result["output"]
+                # Execute code if tool is available
+                test_results = []
+                tests_passed = 0
+                total_tests = len(test_cases)
+                
+                if self.code_exec_tool and test_cases:
+                    try:
+                        # Check if it's a CodeExecutionTool instance
+                        if hasattr(self.code_exec_tool, 'execute_code'):
+                            exec_result = await self.code_exec_tool.execute_code(
+                                code=user_code,
+                                language=language,
+                                test_cases=test_cases
+                            )
+                            tests_passed = exec_result.get("testsPassed", 0)
+                            test_results = exec_result.get("test_results", [])
+                        else:
+                            # If it's a LangChain tool, call it differently
+                            logger.warning("Code execution tool not directly callable, skipping execution")
+                            test_results = []
+                    except Exception as e:
+                        logger.warning(f"Code execution failed: {e}")
+                        test_results = [{"error": str(e)}]
+                
+                # Generate feedback using LLM
+                feedback_prompt = f"""Evaluate this code submission:
+
+Question ID: {question_id}
+Language: {language}
+Code:
+```{language}
+{user_code}
+```
+
+Test Results: {tests_passed}/{total_tests} tests passed
+
+Provide:
+1. Feedback on code correctness
+2. Time and space complexity analysis
+3. Code quality assessment
+4. Suggestions for improvement
+
+Be constructive and encouraging."""
+                
+                try:
+                    feedback_response = await self.llm.ainvoke([HumanMessage(content=feedback_prompt)])
+                    feedback = feedback_response.content if hasattr(feedback_response, 'content') else str(feedback_response)
+                except Exception as e:
+                    feedback = f"Evaluation completed. {tests_passed}/{total_tests} tests passed. Error generating detailed feedback: {e}"
+                
+                output = {
+                    "status": "success" if tests_passed == total_tests else "partial",
+                    "tests_passed": tests_passed,
+                    "total_tests": total_tests,
+                    "test_results": test_results,
+                    "feedback": feedback,
+                    "complexity_analysis": {
+                        "time": question.get("time_complexity", "Unknown") if question else "Unknown",
+                        "space": question.get("space_complexity", "Unknown") if question else "Unknown"
+                    }
+                }
             
             execution_time = (time.time() - start_time) * 1000
             return self._create_result(True, output, execution_time=execution_time)
