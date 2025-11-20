@@ -1,0 +1,13 @@
+.qodo
+.env
+system.md
+venv/
+data/
+logs/
+.DS_Store
+DELIVERABLES.md
+test_results/
+__pycache__/
+.pytest_cache/
+.vscode/
+.idea/
