@@ -11,6 +11,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 import uuid
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 
 from langchain_openai import ChatOpenAI
@@ -20,6 +21,7 @@ from agents.companion_agent import CompanionAgent
 from agents.orchestrator import Orchestrator
 from memory.memory_bank import MemoryBank
 from memory.session_service import InMemorySessionService
+from memory.persistent_session_service import PersistentSessionService
 from tools.search_tool import create_search_tool
 from tools.code_exec_tool import create_code_exec_tool
 from tools.question_bank import QuestionBank
@@ -176,7 +178,23 @@ async def lifespan(app: FastAPI):
     try:
         # Initialize core services
         logger.info("Initializing core services...")
-        app_state.session_service = InMemorySessionService()
+        
+        # Initialize session service with persistence if enabled
+        if settings.SESSION_PERSISTENCE_ENABLED:
+            logger.info(f"Initializing persistent session service (type: {settings.SESSION_STORAGE_TYPE})...")
+            app_state.session_service = PersistentSessionService(
+                storage_type=settings.SESSION_STORAGE_TYPE,
+                storage_path=settings.SESSION_STORAGE_PATH,
+                expiration_hours=settings.SESSION_EXPIRATION_HOURS,
+                auto_save=True
+            )
+            stats = app_state.session_service.get_storage_stats()
+            logger.info(f"✅ Persistent session service initialized: {stats['total_sessions']} sessions loaded")
+        else:
+            logger.info("Initializing in-memory session service (persistence disabled)...")
+            app_state.session_service = InMemorySessionService()
+            logger.info("✅ In-memory session service initialized")
+        
         app_state.memory_bank = MemoryBank(persist_directory=settings.VECTOR_DB_PATH)
         app_state.observability = ObservabilityService()
         logger.info("✅ Core services initialized")
@@ -273,6 +291,28 @@ async def lifespan(app: FastAPI):
         app.state.observability = app_state.observability
         logger.info("✅ Observability service stored in app state")
         
+        # Start background cleanup task for session expiration
+        if isinstance(app_state.session_service, PersistentSessionService):
+            async def periodic_cleanup():
+                """Periodic cleanup of expired sessions"""
+                while True:
+                    try:
+                        await asyncio.sleep(3600)  # Run every hour
+                        if app_state.session_service:
+                            deleted = app_state.session_service.cleanup_expired_sessions()
+                            if deleted > 0:
+                                logger.info(f"Periodic cleanup: removed {deleted} expired sessions")
+                    except asyncio.CancelledError:
+                        logger.info("Periodic cleanup task cancelled")
+                        break
+                    except Exception as e:
+                        logger.error(f"Error in periodic cleanup: {e}")
+            
+            # Start cleanup task
+            cleanup_task = asyncio.create_task(periodic_cleanup())
+            app.state.cleanup_task = cleanup_task  # Store for cleanup on shutdown
+            logger.info("✅ Background cleanup task started")
+        
     except Exception as e:
         logger.error(f"❌ Failed to initialize services: {e}")
         app_state.initialized = False
@@ -284,6 +324,21 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Shutting down Interview Co-Pilot API...")
     
     try:
+        # Cancel background cleanup task if it exists
+        if hasattr(app, 'state') and hasattr(app.state, 'cleanup_task'):
+            app.state.cleanup_task.cancel()
+            try:
+                await app.state.cleanup_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("✅ Background cleanup task cancelled")
+        
+        # Save sessions before shutdown if using persistent service
+        if isinstance(app_state.session_service, PersistentSessionService):
+            logger.info("Saving sessions to persistent storage...")
+            app_state.session_service.force_save()
+            logger.info("✅ Sessions saved")
+        
         # Close any async resources
         if hasattr(app_state.memory_bank, 'client'):
             # ChromaDB client cleanup if needed
@@ -827,6 +882,29 @@ async def get_session_summary(
 
 
 # ============= Observability Endpoints =============
+
+@app.get("/sessions/storage/stats")
+async def get_storage_stats(
+    session_service = Depends(get_session_service)
+):
+    """
+    Get storage statistics for session persistence
+    """
+    try:
+        if isinstance(session_service, PersistentSessionService):
+            stats = session_service.get_storage_stats()
+            return stats
+        else:
+            return {
+                "storage_type": "in-memory",
+                "total_sessions": session_service.get_session_count(),
+                "active_sessions": len(session_service.get_active_sessions()),
+                "persistence_enabled": False
+            }
+    except Exception as e:
+        logger.error(f"Error retrieving storage stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/metrics")
 async def get_metrics():

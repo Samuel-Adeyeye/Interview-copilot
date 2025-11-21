@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql://user:pass@localhost:5432/interview_copilot"
     VECTOR_DB_PATH: str = "./data/vectordb"
     
+    # Session Persistence
+    SESSION_PERSISTENCE_ENABLED: bool = True
+    SESSION_STORAGE_TYPE: str = "file"  # "file" or "sqlite"
+    SESSION_STORAGE_PATH: str = "./data/sessions"
+    SESSION_EXPIRATION_HOURS: int = 168  # 7 days default
+    
     # LLM Settings
     LLM_MODEL: str = "gpt-4o-mini"
     LLM_TEMPERATURE: float = 0.7
