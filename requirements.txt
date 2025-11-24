@@ -1,4 +1,9 @@
-# Core Framework
+# Core Framework - ADK Migration
+# Note: Keeping LangChain temporarily for gradual migration
+google-adk>=0.1.0
+google-genai>=0.2.0
+
+# Legacy Framework (to be removed after migration)
 langgraph>=0.2.0
 langchain>=0.3.0
 langchain-openai>=0.2.0
