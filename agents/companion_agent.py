@@ -4,6 +4,7 @@ Provides personalized encouragement, tips, and progress tracking
 """
 
 from agents.base_agent import BaseAgent, AgentContext, AgentResult
+from exceptions import AgentExecutionError, ValidationError, MemoryError
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from typing import Dict, Any, List, Optional
@@ -424,19 +425,37 @@ Return only the recommendations as a numbered list."""
             
         except ValueError as ve:
             execution_time = (time.time() - start_time) * 1000
+            validation_error = ValidationError(
+                message=str(ve),
+                field="inputs",
+                details={"session_id": context.session_id}
+            )
             return self._create_result(
                 success=False,
                 output=None,
-                error=f"Validation error: {str(ve)}",
+                error=validation_error.message,
+                execution_time=execution_time
+            )
+        except MemoryError as mem_error:
+            execution_time = (time.time() - start_time) * 1000
+            return self._create_result(
+                success=False,
+                output=None,
+                error=mem_error.message,
                 execution_time=execution_time
             )
         except Exception as e:
             execution_time = (time.time() - start_time) * 1000
-            logger.error(f"Companion agent error: {e}")
+            agent_error = AgentExecutionError(
+                agent_name="companion",
+                message=str(e),
+                details={"session_id": context.session_id},
+                original_error=e
+            )
             return self._create_result(
                 success=False,
                 output=None,
-                error=f"Companion agent error: {str(e)}",
+                error=agent_error.message,
                 execution_time=execution_time
             )
 

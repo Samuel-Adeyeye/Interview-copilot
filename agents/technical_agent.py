@@ -1,4 +1,5 @@
 from agents.base_agent import BaseAgent, AgentContext, AgentResult
+from exceptions import AgentExecutionError, CodeExecutionError, ValidationError
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage
 import json
@@ -62,7 +63,13 @@ class TechnicalAgent(BaseAgent):
                             test_results = []
                     except Exception as e:
                         logger.warning(f"Code execution failed: {e}")
-                        test_results = [{"error": str(e)}]
+                        code_error = CodeExecutionError(
+                            message=str(e),
+                            language=language,
+                            code=user_code,
+                            original_error=e
+                        )
+                        test_results = [{"error": code_error.message}]
                 
                 # Generate feedback using LLM
                 feedback_prompt = f"""Evaluate this code submission:
@@ -105,6 +112,23 @@ Be constructive and encouraging."""
             execution_time = (time.time() - start_time) * 1000
             return self._create_result(True, output, execution_time=execution_time)
             
+        except ValueError as ve:
+            execution_time = (time.time() - start_time) * 1000
+            validation_error = ValidationError(
+                message=str(ve),
+                field="inputs",
+                details={"session_id": context.session_id}
+            )
+            return self._create_result(False, None, error=validation_error.message, execution_time=execution_time)
+        except CodeExecutionError as code_error:
+            execution_time = (time.time() - start_time) * 1000
+            return self._create_result(False, None, error=code_error.message, execution_time=execution_time)
         except Exception as e:
             execution_time = (time.time() - start_time) * 1000
-            return self._create_result(False, None, error=str(e), execution_time=execution_time)
+            agent_error = AgentExecutionError(
+                agent_name="technical",
+                message=str(e),
+                details={"session_id": context.session_id},
+                original_error=e
+            )
+            return self._create_result(False, None, error=agent_error.message, execution_time=execution_time)

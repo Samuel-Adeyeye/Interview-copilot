@@ -5,6 +5,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langchain_community.tools.tavily_search import TavilySearchResults
 from agents.base_agent import BaseAgent, AgentContext, AgentResult
+from exceptions import AgentExecutionError, ValidationError, APIError
 from pydantic import BaseModel, Field
 from typing import List
 import time
@@ -218,18 +219,38 @@ Extract and organize the information into the required format. If information is
         except ValueError as ve:
             # Input validation errors
             execution_time = (time.time() - start_time) * 1000
+            validation_error = ValidationError(
+                message=str(ve),
+                field="inputs",
+                details={"session_id": context.session_id}
+            )
             return self._create_result(
                 success=False,
                 output=None,
-                error=f"Validation error: {str(ve)}",
+                error=validation_error.message,
                 execution_time=execution_time
             )
-        except Exception as e:
-            # General errors
+        except APIError as api_error:
+            # API errors (OpenAI, Tavily, etc.)
             execution_time = (time.time() - start_time) * 1000
             return self._create_result(
                 success=False,
                 output=None,
-                error=f"Research agent error: {str(e)}",
+                error=api_error.message,
+                execution_time=execution_time
+            )
+        except Exception as e:
+            # General errors - wrap in AgentExecutionError
+            execution_time = (time.time() - start_time) * 1000
+            agent_error = AgentExecutionError(
+                agent_name="research",
+                message=str(e),
+                details={"session_id": context.session_id},
+                original_error=e
+            )
+            return self._create_result(
+                success=False,
+                output=None,
+                error=agent_error.message,
                 execution_time=execution_time
             )

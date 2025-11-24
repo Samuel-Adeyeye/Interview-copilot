@@ -26,6 +26,16 @@ from tools.search_tool import create_search_tool
 from tools.code_exec_tool import create_code_exec_tool
 from tools.question_bank import QuestionBank
 from services.observability import ObservabilityService, RequestTracingMiddleware, RateLimitMiddleware
+from middleware.error_handler import error_handler_middleware
+from exceptions import (
+    InterviewCoPilotException,
+    SessionNotFoundError,
+    SessionError,
+    ValidationError,
+    ServiceUnavailableError,
+    AgentExecutionError,
+    APIError
+)
 from config.settings import settings
 
 # Configure logging
@@ -122,15 +132,15 @@ app_state = ApplicationState()
 async def get_session_service():
     """Dependency to get session service"""
     if not app_state.initialized:
-        raise HTTPException(
-            status_code=503,
-            detail="Service not initialized. Please wait for the API to finish starting up."
+        raise ServiceUnavailableError(
+            service_name="session_service",
+            message="Service not initialized. Please wait for the API to finish starting up."
         )
     if app_state.session_service is None:
         logger.error("Session service is None but app is marked as initialized")
-        raise HTTPException(
-            status_code=503,
-            detail="Session service is not available"
+        raise ServiceUnavailableError(
+            service_name="session_service",
+            message="Session service is not available"
         )
     return app_state.session_service
 
@@ -138,15 +148,15 @@ async def get_session_service():
 async def get_memory_bank():
     """Dependency to get memory bank"""
     if not app_state.initialized:
-        raise HTTPException(
-            status_code=503,
-            detail="Service not initialized. Please wait for the API to finish starting up."
+        raise ServiceUnavailableError(
+            service_name="memory_bank",
+            message="Service not initialized. Please wait for the API to finish starting up."
         )
     if app_state.memory_bank is None:
         logger.error("Memory bank is None but app is marked as initialized")
-        raise HTTPException(
-            status_code=503,
-            detail="Memory bank is not available"
+        raise ServiceUnavailableError(
+            service_name="memory_bank",
+            message="Memory bank is not available"
         )
     return app_state.memory_bank
 
@@ -154,15 +164,15 @@ async def get_memory_bank():
 async def get_orchestrator():
     """Dependency to get orchestrator"""
     if not app_state.initialized:
-        raise HTTPException(
-            status_code=503,
-            detail="Service not initialized. Please wait for the API to finish starting up."
+        raise ServiceUnavailableError(
+            service_name="orchestrator",
+            message="Service not initialized. Please wait for the API to finish starting up."
         )
     if app_state.orchestrator is None:
         logger.error("Orchestrator is None but app is marked as initialized")
-        raise HTTPException(
-            status_code=503,
-            detail="Orchestrator is not available"
+        raise ServiceUnavailableError(
+            service_name="orchestrator",
+            message="Orchestrator is not available"
         )
     return app_state.orchestrator
 
@@ -384,6 +394,12 @@ app.add_middleware(
     max_requests_per_minute=100
 )
 
+# Error handler middleware (should be last to catch all errors)
+@app.middleware("http")
+async def error_handler(request: Request, call_next):
+    """Centralized error handler middleware"""
+    return await error_handler_middleware(request, call_next)
+
 
 # ============= Health & Status Endpoints =============
 
@@ -453,13 +469,12 @@ async def get_session(
     """
     Retrieve session by ID
     """
-    try:
-        session = session_service.get_session(session_id)
-        
-        if not session:
-            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-        
-        return SessionResponse(**session)
+    session = session_service.get_session(session_id)
+    
+    if not session:
+        raise SessionNotFoundError(session_id=session_id)
+    
+    return SessionResponse(**session)
     
     except HTTPException:
         raise
@@ -571,35 +586,44 @@ async def run_research(
     """
     Run research agent to build company prep packet
     """
-    try:
-        session = session_service.get_session(request.session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail=f"Session {request.session_id} not found")
-        
-        logger.info(f"Starting research for session {request.session_id}")
-        
-        # Get user_id from session
-        user_id = session.get("user_id")
-        if not user_id:
-            raise HTTPException(status_code=400, detail="Session missing user_id")
-        
-        # Execute research agent through orchestrator
-        research_result = await orchestrator.execute_research(
-            session_id=request.session_id,
-            user_id=user_id,
-            job_description=request.job_description,
-            company_name=request.company_name
+    session = session_service.get_session(request.session_id)
+    if not session:
+        raise SessionNotFoundError(session_id=request.session_id)
+    
+    logger.info(f"Starting research for session {request.session_id}")
+    
+    # Get user_id from session
+    user_id = session.get("user_id")
+    if not user_id:
+        raise SessionError(
+            message="Session missing user_id",
+            session_id=request.session_id
         )
-        
-        if not research_result.get("success"):
-            error_msg = research_result.get("error", "Research agent failed")
-            logger.error(f"Research failed: {error_msg}")
-            raise HTTPException(status_code=500, detail=error_msg)
-        
-        # Extract research packet from result
-        research_output = research_result.get("output", {})
-        if not research_output:
-            raise HTTPException(status_code=500, detail="Research agent returned empty output")
+    
+    # Execute research agent through orchestrator
+    research_result = await orchestrator.execute_research(
+        session_id=request.session_id,
+        user_id=user_id,
+        job_description=request.job_description,
+        company_name=request.company_name
+    )
+    
+    if not research_result.get("success"):
+        error_msg = research_result.get("error", "Research agent failed")
+        raise AgentExecutionError(
+            agent_name="research",
+            message=error_msg,
+            details={"session_id": request.session_id}
+        )
+    
+    # Extract research packet from result
+    research_output = research_result.get("output", {})
+    if not research_output:
+        raise AgentExecutionError(
+            agent_name="research",
+            message="Research agent returned empty output",
+            details={"session_id": request.session_id}
+        )
         
         # Format response
         result = {
@@ -621,13 +645,7 @@ async def run_research(
             }
         )
         
-        return ResearchResponse(**result)
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error running research: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return ResearchResponse(**result)
 
 
 # ============= Mock Interview Endpoints =============
@@ -641,17 +659,19 @@ async def start_mock_interview(
     """
     Start mock technical interview session
     """
-    try:
-        session = session_service.get_session(request.session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail=f"Session {request.session_id} not found")
-        
-        logger.info(f"Starting mock interview for session {request.session_id}")
-        
-        # Get user_id and job description from session
-        user_id = session.get("user_id")
-        if not user_id:
-            raise HTTPException(status_code=400, detail="Session missing user_id")
+    session = session_service.get_session(request.session_id)
+    if not session:
+        raise SessionNotFoundError(session_id=request.session_id)
+    
+    logger.info(f"Starting mock interview for session {request.session_id}")
+    
+    # Get user_id and job description from session
+    user_id = session.get("user_id")
+    if not user_id:
+        raise SessionError(
+            message="Session missing user_id",
+            session_id=request.session_id
+        )
         
         # Get job description from research results if available
         agent_states = session.get("agent_states", {})
@@ -669,17 +689,24 @@ async def start_mock_interview(
             num_questions=request.num_questions
         )
         
-        if not technical_result.get("success"):
-            error_msg = technical_result.get("error", "Technical agent failed")
-            logger.error(f"Technical agent failed: {error_msg}")
-            raise HTTPException(status_code=500, detail=error_msg)
-        
-        # Extract questions from result
-        tech_output = technical_result.get("output", {})
-        questions = tech_output.get("questions", [])
-        
-        if not questions:
-            raise HTTPException(status_code=500, detail="No questions selected")
+    if not technical_result.get("success"):
+        error_msg = technical_result.get("error", "Technical agent failed")
+        raise AgentExecutionError(
+            agent_name="technical",
+            message=error_msg,
+            details={"session_id": request.session_id}
+        )
+    
+    # Extract questions from result
+    tech_output = technical_result.get("output", {})
+    questions = tech_output.get("questions", [])
+    
+    if not questions:
+        raise AgentExecutionError(
+            agent_name="technical",
+            message="No questions selected",
+            details={"session_id": request.session_id}
+        )
         
         # Update session
         session_service.update_agent_state(
@@ -693,18 +720,12 @@ async def start_mock_interview(
             }
         )
         
-        return {
-            "session_id": request.session_id,
-            "status": "started",
-            "questions": questions,
-            "message": f"Mock interview started with {len(questions)} questions"
-        }
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error starting mock interview: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "session_id": request.session_id,
+        "status": "started",
+        "questions": questions,
+        "message": f"Mock interview started with {len(questions)} questions"
+    }
 
 
 @app.post("/interview/submit-code", response_model=EvaluationResponse)
@@ -716,17 +737,19 @@ async def submit_code(
     """
     Submit code for evaluation with automated testing
     """
-    try:
-        session = session_service.get_session(request.session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail=f"Session {request.session_id} not found")
-        
-        logger.info(f"Evaluating code submission for session {request.session_id}, question {request.question_id}")
-        
-        # Get user_id from session
-        user_id = session.get("user_id")
-        if not user_id:
-            raise HTTPException(status_code=400, detail="Session missing user_id")
+    session = session_service.get_session(request.session_id)
+    if not session:
+        raise SessionNotFoundError(session_id=request.session_id)
+    
+    logger.info(f"Evaluating code submission for session {request.session_id}, question {request.question_id}")
+    
+    # Get user_id from session
+    user_id = session.get("user_id")
+    if not user_id:
+        raise SessionError(
+            message="Session missing user_id",
+            session_id=request.session_id
+        )
         
         # Execute technical agent with code execution tool
         technical_result = await orchestrator.execute_technical(
@@ -738,10 +761,17 @@ async def submit_code(
             language=request.language
         )
         
-        if not technical_result.get("success"):
-            error_msg = technical_result.get("error", "Code evaluation failed")
-            logger.error(f"Code evaluation failed: {error_msg}")
-            raise HTTPException(status_code=500, detail=error_msg)
+    if not technical_result.get("success"):
+        error_msg = technical_result.get("error", "Code evaluation failed")
+        raise AgentExecutionError(
+            agent_name="technical",
+            message=error_msg,
+            details={
+                "session_id": request.session_id,
+                "question_id": request.question_id,
+                "language": request.language
+            }
+        )
         
         # Extract evaluation from result
         tech_output = technical_result.get("output", {})
@@ -787,13 +817,7 @@ async def submit_code(
             }
         )
         
-        return EvaluationResponse(**evaluation)
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error evaluating code: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return EvaluationResponse(**evaluation)
 
 
 # ============= Memory & Progress Endpoints =============

@@ -1,0 +1,24 @@
+# Development docker-compose override
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    volumes:
+      # Mount source code for hot reload (if using watchfiles)
+      - .:/app
+    environment:
+      - LOG_LEVEL=DEBUG
+      - PYTHONUNBUFFERED=1
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  ui:
+    volumes:
+      # Mount source code for development
+      - .:/app
+    environment:
+      - LOG_LEVEL=DEBUG
+

@@ -1,12 +1,61 @@
 import pytest
 from httpx import AsyncClient
-from api.main import app
+from fastapi.testclient import TestClient
+from unittest.mock import Mock, AsyncMock, patch, MagicMock
+import os
+
+# Set test environment variables
+os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
+os.environ.setdefault("TAVILY_API_KEY", "test-tavily-key")
+os.environ.setdefault("JUDGE0_API_KEY", "test-judge0-key")
+os.environ.setdefault("SESSION_PERSISTENCE_ENABLED", "false")
+os.environ.setdefault("VECTOR_DB_PATH", "./data/vectordb_test")
 
 @pytest.fixture
 async def client():
-    """Fixture for test client"""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
-        yield ac
+    """Fixture for test client with mocked dependencies"""
+    from api.main import app
+    
+    # Mock the lifespan dependencies
+    with patch('api.main.ChatOpenAI') as mock_llm_class, \
+         patch('api.main.create_search_tool') as mock_search, \
+         patch('api.main.create_code_exec_tool') as mock_code_exec, \
+         patch('api.main.QuestionBank') as mock_qb, \
+         patch('api.main.ResearchAgentStructured') as mock_research, \
+         patch('api.main.TechnicalAgent') as mock_technical, \
+         patch('api.main.CompanionAgent') as mock_companion, \
+         patch('api.main.Orchestrator') as mock_orchestrator:
+        
+        # Setup mocks
+        mock_llm = Mock()
+        mock_llm_class.return_value = mock_llm
+        
+        mock_search_tool = Mock()
+        mock_search.return_value = mock_search_tool
+        
+        mock_code_exec_tool = Mock()
+        mock_code_exec.return_value = mock_code_exec_tool
+        
+        mock_question_bank = Mock()
+        mock_question_bank.get_question_count.return_value = 5
+        mock_qb.return_value = mock_question_bank
+        
+        # Mock agents
+        mock_research_agent = Mock()
+        mock_research.return_value = mock_research_agent
+        
+        mock_technical_agent = Mock()
+        mock_technical.return_value = mock_technical_agent
+        
+        mock_companion_agent = Mock()
+        mock_companion.return_value = mock_companion_agent
+        
+        mock_orch = Mock()
+        mock_orchestrator.return_value = mock_orch
+        
+        # Create test client
+        async with AsyncClient(app=app, base_url="http://test") as ac:
+            yield ac
 
 @pytest.fixture
 def sample_job_description():

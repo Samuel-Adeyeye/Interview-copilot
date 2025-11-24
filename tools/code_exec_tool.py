@@ -1,4 +1,5 @@
 from langchain_core.tools import Tool
+from exceptions import CodeExecutionError, APIError
 from typing import Dict, Any, List
 import httpx
 import json
