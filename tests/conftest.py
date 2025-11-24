@@ -12,6 +12,7 @@ from datetime import datetime
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("TAVILY_API_KEY", "test-tavily-key")
 os.environ.setdefault("JUDGE0_API_KEY", "test-judge0-key")
+os.environ.setdefault("GOOGLE_API_KEY", "test-google-key")  # For ADK
 
 
 @pytest.fixture(scope="session")
@@ -51,6 +52,15 @@ def mock_llm():
 
 
 @pytest.fixture
+def mock_gemini_model():
+    """Mock Gemini model for ADK testing"""
+    model = Mock()
+    model.model = "gemini-2.5-flash-lite"
+    model.temperature = 0.7
+    return model
+
+
+@pytest.fixture
 def mock_memory_bank():
     """Mock MemoryBank for testing"""
     memory_bank = Mock()
@@ -86,6 +96,17 @@ def mock_session_service():
     session_service.resume_session = Mock(return_value={"status": "running"})
     session_service.update_session_metadata = Mock()
     return session_service
+
+
+@pytest.fixture
+def mock_adk_session_service():
+    """Mock ADK Session Service for testing"""
+    service = Mock()
+    service.create_session = AsyncMock()
+    service.get_session = AsyncMock()
+    service.save_session = AsyncMock()
+    service.delete_session = AsyncMock()
+    return service
 
 
 @pytest.fixture
@@ -230,4 +251,3 @@ def mock_judge0_response():
         "time": "0.1",
         "memory": 1000
     }
-
