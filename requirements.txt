@@ -1,13 +1,6 @@
 # Core Framework - ADK Migration
-# Note: Keeping LangChain temporarily for gradual migration
 google-adk>=0.1.0
 google-genai>=0.2.0
-
-# Legacy Framework (to be removed after migration)
-langgraph>=0.2.0
-langchain>=0.3.0
-langchain-openai>=0.2.0
-langchain-community>=0.3.0
 
 # API & Web
 fastapi>=0.115.0
@@ -21,7 +14,6 @@ sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.0  # For legacy/sync operations
 psycopg[binary]>=3.1.0  # Async PostgreSQL driver for ADK DatabaseSessionService
 chromadb>=0.5.0
-# OR: qdrant-client>=1.11.0
 
 # Tools & Utilities
 httpx>=0.27.0
@@ -46,4 +38,3 @@ pytest>=8.0.0
 pytest-asyncio>=0.23.0
 pytest-mock>=3.12.0
 pytest-cov>=4.1.0
-httpx>=0.27.0

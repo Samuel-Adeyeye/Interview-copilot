@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api/v2/adk", tags=["ADK"])
 class ADKResearchRequest(BaseModel):
     """Request to run research agent via ADK"""
     session_id: str
-    user_id: str
+    user_id: Optional[str] = None  # Optional - will be extracted from session if not provided
     company_name: str
     job_description: str
 
@@ -70,11 +70,26 @@ async def run_research_adk(
     Returns streaming response with research results.
     """
     try:
+        # Get user_id from session if not provided
+        user_id = request.user_id
+        if not user_id:
+            # Try to get from session service
+            from api.main import app_state
+            if app_state.session_service:
+                session = app_state.session_service.get_session(request.session_id)
+                if session:
+                    user_id = session.get("user_id")
+            if not user_id:
+                raise ValidationError(
+                    message="user_id is required. Either provide it in the request or ensure the session has a user_id.",
+                    field="user_id"
+                )
+        
         async def generate():
             """Generate streaming response"""
             full_response = ""
             async for event in adk_app.run_research(
-                user_id=request.user_id,
+                user_id=user_id,
                 session_id=request.session_id,
                 company_name=request.company_name,
                 job_description=request.job_description
@@ -96,6 +111,8 @@ async def run_research_adk(
             }
         )
         
+    except ValidationError as ve:
+        raise HTTPException(status_code=400, detail=ve.message)
     except Exception as e:
         logger.error(f"Error in ADK research endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))

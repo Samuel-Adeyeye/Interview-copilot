@@ -6,7 +6,8 @@ Coordinates the execution of research, technical, and companion agents using ADK
 from google.adk.agents import SequentialAgent, LlmAgent
 from google.adk.tools import AgentTool
 from google.adk.models.google_llm import Gemini
-from google.adk.runners import InMemoryRunner
+from google.adk.runners import InMemoryRunner, Runner
+from google.adk.apps import App
 from google.genai import types
 from agents.adk.research_agent import create_research_agent
 from agents.adk.technical_agent import create_technical_agent
@@ -76,7 +77,10 @@ class ADKOrchestrator:
             self.workflow = self._create_llm_orchestrator()
         
         # Create runner for execution
-        self.runner = InMemoryRunner(agent=self.workflow)
+        self.runner = InMemoryRunner(
+            agent=self.workflow,
+            app_name="interview_copilot"  # Match the app name used in session service
+        )
         
         logger.info("✅ ADK Orchestrator created")
     
@@ -184,33 +188,130 @@ Job Description context:
                 parts=[types.Part(text=query_text)]
             )
             
-            # Run research agent directly
-            runner = InMemoryRunner(agent=self.research_agent)
+            # Run research agent using Runner with our session service
+            # InMemoryRunner has its own session management, so we use Runner instead
+            from google.adk.runners import Runner
+            from google.adk.apps import App
             
-            result = None
-            async for event in runner.run_async(
-                user_id=user_id,
-                session_id=session_id,
-                new_message=query
-            ):
-                if event.content and event.content.parts:
-                    result = event.content.parts[0].text
+            # Create app with research agent
+            app = App(agent=self.research_agent)
             
-            # Get structured output from session state
-            # Note: In ADK, structured output would be in session.state[output_key]
-            # For now, we'll parse the text response
+            # Use Runner with our session service if available
+            if self.session_service and hasattr(self.session_service, 'service'):
+                # ADK session service - ensure session exists
+                adk_session_service = self.session_service.service
+                try:
+                    # Try to get session, create if it doesn't exist
+                    session = await adk_session_service.get_session(
+                        app_name="interview_copilot",
+                        session_id=session_id
+                    )
+                    if not session:
+                        # Create session in ADK format
+                        session = await adk_session_service.create_session(
+                            app_name="interview_copilot",
+                            user_id=user_id,
+                            session_id=session_id
+                        )
+                        logger.info(f"Created ADK session: {session_id}")
+                except Exception as session_error:
+                    logger.warning(f"Could not get/create ADK session: {session_error}, continuing anyway")
+                
+                # ADK session service
+                runner = Runner(
+                    app=app,
+                    session_service=adk_session_service,
+                    app_name="interview_copilot"
+                )
+            else:
+                # Fallback to InMemoryRunner if no session service
+                runner = InMemoryRunner(
+                    agent=self.research_agent,
+                    app_name="agents"  # Use default to avoid mismatch
+                )
             
-            return {
-                "success": True,
-                "output": {
-                    "company_name": company_name,
-                    "research_text": result or "Research completed",
-                    "job_description": job_description
-                },
-                "error": None,
-                "execution_time_ms": 0,
-                "trace_id": None
-            }
+            result_text = None
+            all_text_parts = []
+            
+            try:
+                # Run the agent and collect all text responses
+                event_count = 0
+                async for event in runner.run_async(
+                    user_id=user_id,
+                    session_id=session_id,
+                    new_message=query
+                ):
+                    event_count += 1
+                    logger.debug(f"Received event {event_count}: {type(event)}")
+                    
+                    # Extract text from event
+                    try:
+                        if hasattr(event, 'content') and event.content:
+                            if hasattr(event.content, 'parts') and event.content.parts:
+                                for part in event.content.parts:
+                                    if hasattr(part, 'text') and part.text:
+                                        all_text_parts.append(part.text)
+                                        result_text = part.text  # Keep last one
+                                        logger.debug(f"Extracted text: {part.text[:100]}...")
+                                    elif hasattr(part, 'function_call'):
+                                        # Handle function calls if needed
+                                        logger.debug(f"Function call: {part.function_call}")
+                        elif hasattr(event, 'text'):
+                            # Direct text attribute
+                            result_text = event.text
+                            all_text_parts.append(result_text)
+                    except Exception as parse_error:
+                        logger.warning(f"Error parsing event: {parse_error}")
+                        # Try to get string representation
+                        if hasattr(event, '__str__'):
+                            result_text = str(event)
+                            all_text_parts.append(result_text)
+                
+                logger.info(f"Processed {event_count} events, extracted {len(all_text_parts)} text parts")
+            
+                # Build research packet from result
+                # The agent should return structured information, but we'll parse it
+                if result_text:
+                    # Try to extract structured information from the text
+                    # For now, create a basic structure
+                    research_packet = {
+                        "company_overview": result_text[:500] if len(result_text) > 500 else result_text,
+                        "interview_process": "See company overview for details",
+                        "tech_stack": [],  # Would need parsing or agent to return this
+                        "recent_news": [],  # Would need parsing or agent to return this
+                        "preparation_tips": [result_text[-200:] if len(result_text) > 200 else result_text]  # Use end of text as tips
+                    }
+                else:
+                    # Fallback if no result
+                    research_packet = {
+                        "company_overview": f"Research completed for {company_name}. Please check the full response.",
+                        "interview_process": "Research in progress",
+                        "tech_stack": [],
+                        "recent_news": [],
+                        "preparation_tips": []
+                    }
+                
+                return {
+                    "success": True,
+                    "output": research_packet,
+                    "error": None,
+                    "execution_time_ms": 0,
+                    "trace_id": None
+                }
+                
+            except Exception as run_error:
+                logger.error(f"Error in runner.run_async: {run_error}", exc_info=True)
+                import traceback
+                error_trace = traceback.format_exc()
+                logger.error(f"Full traceback:\n{error_trace}")
+                # Return error instead of raising to match expected format
+                return {
+                    "success": False,
+                    "output": None,
+                    "error": f"{type(run_error).__name__}: {str(run_error)}",
+                    "execution_time_ms": 0,
+                    "trace_id": None
+                }
             
         except Exception as e:
             logger.error(f"Error executing research: {e}")
@@ -284,8 +385,27 @@ Use get_question_by_id() to get test cases, then execute the code and provide co
                 parts=[types.Part(text=query_text)]
             )
             
-            # Run technical agent directly
-            runner = InMemoryRunner(agent=self.technical_agent)
+            # Run technical agent using Runner with our session service
+            from google.adk.runners import Runner
+            from google.adk.apps import App
+            
+            # Create app with technical agent
+            app = App(agent=self.technical_agent)
+            
+            # Use Runner with our session service if available
+            if self.session_service and hasattr(self.session_service, 'service'):
+                # ADK session service
+                runner = Runner(
+                    app=app,
+                    session_service=self.session_service.service,
+                    app_name="interview_copilot"
+                )
+            else:
+                # Fallback to InMemoryRunner if no session service
+                runner = InMemoryRunner(
+                    agent=self.technical_agent,
+                    app_name="agents"  # Use default to avoid mismatch
+                )
             
             result = None
             async for event in runner.run_async(
