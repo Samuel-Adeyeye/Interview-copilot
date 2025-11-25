@@ -10,6 +10,7 @@ The Interview Co-Pilot can be run using Docker and Docker Compose. This guide co
 - Docker Compose 2.0+
 - At least 4GB RAM available
 - 10GB free disk space
+- **Google API Key** (required for ADK/Gemini) - Get one from [Google AI Studio](https://makersuite.google.com/app/apikey)
 
 ## Quick Start
 
@@ -45,7 +46,10 @@ docker-compose down
 
 - **Port**: 8000
 - **Health Check**: `http://localhost:8000/health`
+- **ADK Health Check**: `http://localhost:8000/api/v2/adk/health`
 - **Dependencies**: PostgreSQL, Redis
+- **Required Environment Variables**:
+  - `GOOGLE_API_KEY` (required for ADK/Gemini)
 - **Volumes**: 
   - `./data` → `/app/data` (persistent data)
   - `./logs` → `/app/logs` (application logs)
@@ -77,10 +81,20 @@ docker-compose down
 Create a `.env` file in the project root:
 
 ```env
-# API Keys (Required)
-OPENAI_API_KEY=your_openai_key
-TAVILY_API_KEY=your_tavily_key
-JUDGE0_API_KEY=your_judge0_key
+# API Keys (Required for ADK)
+GOOGLE_API_KEY=your_google_api_key  # Required for ADK/Gemini
+
+# ADK/Gemini Settings
+ADK_MODEL=gemini-2.5-flash-lite  # Default ADK model
+ADK_TEMPERATURE=0.7
+ADK_RETRY_ATTEMPTS=5
+ADK_RETRY_BASE=7
+ADK_INITIAL_DELAY=1
+
+# Legacy API Keys (for backward compatibility)
+OPENAI_API_KEY=your_openai_key  # Optional - for legacy endpoints
+TAVILY_API_KEY=your_tavily_key  # Optional - ADK uses google_search
+JUDGE0_API_KEY=your_judge0_key  # Optional - can use BuiltInCodeExecutor
 
 # Database
 POSTGRES_USER=postgres
@@ -100,7 +114,7 @@ SESSION_STORAGE_TYPE=file
 SESSION_STORAGE_PATH=/app/data/sessions
 SESSION_EXPIRATION_HOURS=168
 
-# LLM Settings
+# LLM Settings (Legacy - OpenAI)
 LLM_MODEL=gpt-4o-mini
 LLM_TEMPERATURE=0.7
 
@@ -353,14 +367,75 @@ For production, use Docker secrets or environment variable management:
 services:
   api:
     secrets:
-      - openai_api_key
+      - google_api_key
       - database_password
 secrets:
-  openai_api_key:
+  google_api_key:
     external: true
   database_password:
     external: true
 ```
+
+## ADK-Specific Configuration
+
+### Google API Key Setup
+
+The Interview Co-Pilot uses Google's Agent Development Kit (ADK) which requires a Google API Key:
+
+1. **Get API Key**: Visit [Google AI Studio](https://makersuite.google.com/app/apikey) to create an API key
+2. **Add to .env**: Add `GOOGLE_API_KEY=your_key_here` to your `.env` file
+3. **Verify**: Check ADK health endpoint: `http://localhost:8000/api/v2/adk/health`
+
+### ADK Endpoints
+
+The application now includes ADK-powered endpoints:
+
+- **ADK Health**: `GET /api/v2/adk/health`
+- **ADK Workflow**: `POST /api/v2/adk/workflow` (streaming)
+- **ADK Research**: `POST /api/v2/adk/research` (streaming)
+- **ADK Technical**: `POST /api/v2/adk/technical` (streaming)
+
+### ADK Model Configuration
+
+Configure the Gemini model used by ADK:
+
+```env
+# Use faster model for development
+ADK_MODEL=gemini-2.5-flash-lite
+
+# Use more capable model for production
+ADK_MODEL=gemini-2.0-flash-exp
+```
+
+### Testing ADK in Docker
+
+```bash
+# Check ADK health
+curl http://localhost:8000/api/v2/adk/health
+
+# Test ADK workflow (requires GOOGLE_API_KEY)
+curl -X POST http://localhost:8000/api/v2/adk/workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "test-session",
+    "user_id": "test-user",
+    "company_name": "Google",
+    "job_description": "Software Engineer role"
+  }'
+```
+
+### ADK Troubleshooting
+
+**Issue**: ADK health endpoint returns 500
+- **Solution**: Verify `GOOGLE_API_KEY` is set in `.env` file
+- **Check**: `docker-compose exec api env | grep GOOGLE_API_KEY`
+
+**Issue**: ADK endpoints timeout
+- **Solution**: Increase timeout in test scripts or check network connectivity
+- **Note**: ADK operations may take longer than legacy endpoints
+
+**Issue**: "ADK memory services not available" warning
+- **Solution**: This is expected if not using Vertex AI Memory Bank. The application will use fallback memory service.
 
 ## Monitoring
 
@@ -442,4 +517,6 @@ docker-compose build --no-cache
 - [Docker Compose Documentation](https://docs.docker.com/compose/)
 - [FastAPI Deployment](https://fastapi.tiangolo.com/deployment/)
 - [Streamlit Deployment](https://docs.streamlit.io/deploy)
+- [Google ADK Documentation](https://google.github.io/adk-docs/)
+- [Google AI Studio](https://makersuite.google.com/app/apikey) (Get API Key)
 

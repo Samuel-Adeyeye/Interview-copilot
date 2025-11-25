@@ -45,9 +45,31 @@ A multi-agent AI system for interview preparation, powered by Google's Agent Dev
 
 ### Prerequisites
 
-- Python 3.11+
-- Google API Key (for Gemini)
+- Python 3.11+ (for local development)
+- Docker and Docker Compose (for containerized deployment)
+- Google API Key (for Gemini/ADK) - [Get one here](https://makersuite.google.com/app/apikey)
 - (Optional) Judge0 API Key (for multi-language code execution)
+
+### Quick Start with Docker (Recommended)
+
+```bash
+# 1. Clone repository
+git clone <repository-url>
+cd Interview-copilot
+
+# 2. Create .env file with your API keys
+cp .env.example .env
+# Edit .env and add: GOOGLE_API_KEY=your_key_here
+
+# 3. Start all services
+docker-compose up -d
+
+# 4. Verify installation
+curl http://localhost:8000/health
+curl http://localhost:8000/api/v2/adk/health
+```
+
+See [DOCKER_QUICKSTART.md](DOCKER_QUICKSTART.md) for detailed Docker setup instructions.
 
 ### Setup
 
@@ -109,7 +131,23 @@ streamlit run ui/streamlit_app.py
 
 - **API**: http://localhost:8000
 - **API Docs**: http://localhost:8000/docs
+- **ADK Endpoints**: http://localhost:8000/api/v2/adk/*
 - **UI**: http://localhost:8501
+
+### Using Docker (Alternative)
+
+```bash
+# Quick start with Docker
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
+```
+
+See [DOCKER_QUICKSTART.md](DOCKER_QUICKSTART.md) for detailed instructions.
 
 ## 📡 API Endpoints
 
@@ -190,7 +228,8 @@ pytest tests/ -m api -v
 ### Other Documentation
 
 - [Testing Guide](docs/TESTING.md) - Testing strategy
-- [Docker Setup](docs/DOCKER_SETUP.md) - Docker configuration
+- [Docker Quick Start](DOCKER_QUICKSTART.md) - Quick Docker setup guide
+- [Docker Setup](docs/DOCKER_SETUP.md) - Complete Docker configuration
 - [Error Handling](docs/ERROR_HANDLING.md) - Error handling patterns
 
 ## 🏃 Usage Examples

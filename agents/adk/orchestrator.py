@@ -3,7 +3,8 @@ ADK Orchestrator for Interview Co-Pilot
 Coordinates the execution of research, technical, and companion agents using ADK patterns
 """
 
-from google.adk.agents import SequentialAgent, LlmAgent, AgentTool
+from google.adk.agents import SequentialAgent, LlmAgent
+from google.adk.tools import AgentTool
 from google.adk.models.google_llm import Gemini
 from google.adk.runners import InMemoryRunner
 from google.genai import types
@@ -53,15 +54,14 @@ class ADKOrchestrator:
         """
         # Create agents if not provided
         if research_agent is None:
-            research_agent = create_research_agent(memory_bank=memory_bank)
+            research_agent = create_research_agent()
         if technical_agent is None:
             technical_agent = create_technical_agent(
                 use_builtin_code_executor=use_builtin_code_executor,
-                judge0_api_key=judge0_api_key,
-                memory_bank=memory_bank
+                judge0_api_key=judge0_api_key
             )
         if companion_agent is None:
-            companion_agent = create_companion_agent(memory_bank=memory_bank)
+            companion_agent = create_companion_agent()
         
         self.research_agent = research_agent
         self.technical_agent = technical_agent

@@ -456,9 +456,31 @@ class Orchestrator:
         }
         
         # Execute only research
-        state = await self._run_research(initial_state)
-        
-        return state.get("research_result", {})
+        try:
+            state = await self._run_research(initial_state)
+            research_result = state.get("research_result") if state else None
+            
+            # Ensure we always return a dict, even if research failed
+            if research_result is None:
+                logger.error(f"Research result is None for session {session_id}")
+                return {
+                    "success": False,
+                    "output": None,
+                    "error": "Research agent returned no result",
+                    "execution_time_ms": 0,
+                    "trace_id": None
+                }
+            
+            return research_result
+        except Exception as e:
+            logger.error(f"Error in execute_research: {e}", exc_info=True)
+            return {
+                "success": False,
+                "output": None,
+                "error": str(e),
+                "execution_time_ms": 0,
+                "trace_id": None
+            }
     
     async def execute_technical(
         self,

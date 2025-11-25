@@ -5,7 +5,7 @@ Converts JD parser to ADK FunctionTool
 
 from google.adk.tools import FunctionTool
 from tools.jd_parser_tool import extract_basic_info, ParsedJobDescription
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import logging
 
 logger = logging.getLogger(__name__)

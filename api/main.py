@@ -3,7 +3,7 @@ FastAPI Backend for Interview Co-Pilot
 Main API endpoints for orchestrating multi-agent system
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -22,6 +22,7 @@ from agents.orchestrator import Orchestrator
 from memory.memory_bank import MemoryBank
 from memory.session_service import InMemorySessionService
 from memory.persistent_session_service import PersistentSessionService
+from memory.adk.session_service import create_adk_session_service, ADKSessionService
 from tools.search_tool import create_search_tool
 from tools.code_exec_tool import create_code_exec_tool
 from tools.question_bank import QuestionBank
@@ -192,14 +193,31 @@ async def lifespan(app: FastAPI):
         # Initialize session service with persistence if enabled
         if settings.SESSION_PERSISTENCE_ENABLED:
             logger.info(f"Initializing persistent session service (type: {settings.SESSION_STORAGE_TYPE})...")
-            app_state.session_service = PersistentSessionService(
-                storage_type=settings.SESSION_STORAGE_TYPE,
-                storage_path=settings.SESSION_STORAGE_PATH,
-                expiration_hours=settings.SESSION_EXPIRATION_HOURS,
-                auto_save=True
-            )
-            stats = app_state.session_service.get_storage_stats()
-            logger.info(f"✅ Persistent session service initialized: {stats['total_sessions']} sessions loaded")
+            
+            # Use ADK DatabaseSessionService for PostgreSQL
+            if settings.SESSION_STORAGE_TYPE == "database":
+                # Use DATABASE_URL for PostgreSQL connection
+                db_url = settings.DATABASE_URL
+                if not db_url:
+                    raise ValueError("DATABASE_URL is required when SESSION_STORAGE_TYPE=database")
+                
+                logger.info(f"Using ADK DatabaseSessionService with PostgreSQL: {db_url.split('@')[1] if '@' in db_url else 'configured'}")
+                app_state.session_service = create_adk_session_service(
+                    use_database=True,
+                    db_url=db_url,
+                    app_name="interview_copilot"
+                )
+                logger.info("✅ ADK DatabaseSessionService initialized (PostgreSQL)")
+            else:
+                # Use PersistentSessionService for file or sqlite
+                app_state.session_service = PersistentSessionService(
+                    storage_type=settings.SESSION_STORAGE_TYPE,
+                    storage_path=settings.SESSION_STORAGE_PATH,
+                    expiration_hours=settings.SESSION_EXPIRATION_HOURS,
+                    auto_save=True
+                )
+                stats = app_state.session_service.get_storage_stats()
+                logger.info(f"✅ Persistent session service initialized: {stats['total_sessions']} sessions loaded")
         else:
             logger.info("Initializing in-memory session service (persistence disabled)...")
             app_state.session_service = InMemorySessionService()
@@ -302,16 +320,20 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Observability service stored in app state")
         
         # Start background cleanup task for session expiration
-        if isinstance(app_state.session_service, PersistentSessionService):
+        if isinstance(app_state.session_service, (PersistentSessionService, ADKSessionService)):
             async def periodic_cleanup():
                 """Periodic cleanup of expired sessions"""
                 while True:
                     try:
                         await asyncio.sleep(3600)  # Run every hour
                         if app_state.session_service:
-                            deleted = app_state.session_service.cleanup_expired_sessions()
-                            if deleted > 0:
-                                logger.info(f"Periodic cleanup: removed {deleted} expired sessions")
+                            # ADK session service cleanup is async
+                            if isinstance(app_state.session_service, ADKSessionService):
+                                await app_state.session_service.cleanup_expired_sessions()
+                            else:
+                                deleted = app_state.session_service.cleanup_expired_sessions()
+                                if deleted > 0:
+                                    logger.info(f"Periodic cleanup: removed {deleted} expired sessions")
                     except asyncio.CancelledError:
                         logger.info("Periodic cleanup task cancelled")
                         break
@@ -348,6 +370,9 @@ async def lifespan(app: FastAPI):
             logger.info("Saving sessions to persistent storage...")
             app_state.session_service.force_save()
             logger.info("✅ Sessions saved")
+        elif isinstance(app_state.session_service, ADKSessionService):
+            # ADK DatabaseSessionService handles persistence automatically
+            logger.info("ADK session service uses automatic persistence")
         
         # Close any async resources
         if hasattr(app_state.memory_bank, 'client'):
@@ -393,6 +418,14 @@ app.add_middleware(
     RateLimitMiddleware,
     max_requests_per_minute=100
 )
+
+# Include ADK router if available
+try:
+    from api.adk_endpoints import router as adk_router
+    app.include_router(adk_router)
+    logger.info("✅ ADK endpoints included")
+except ImportError as e:
+    logger.warning(f"⚠️  ADK endpoints not available: {e}")
 
 # Error handler middleware (should be last to catch all errors)
 @app.middleware("http")
@@ -469,12 +502,13 @@ async def get_session(
     """
     Retrieve session by ID
     """
-    session = session_service.get_session(session_id)
-    
-    if not session:
-        raise SessionNotFoundError(session_id=session_id)
-    
-    return SessionResponse(**session)
+    try:
+        session = session_service.get_session(session_id)
+        
+        if not session:
+            raise SessionNotFoundError(session_id=session_id)
+        
+        return SessionResponse(**session)
     
     except HTTPException:
         raise
@@ -601,12 +635,29 @@ async def run_research(
         )
     
     # Execute research agent through orchestrator
-    research_result = await orchestrator.execute_research(
-        session_id=request.session_id,
-        user_id=user_id,
-        job_description=request.job_description,
-        company_name=request.company_name
-    )
+    try:
+        research_result = await orchestrator.execute_research(
+            session_id=request.session_id,
+            user_id=user_id,
+            job_description=request.job_description,
+            company_name=request.company_name
+        )
+    except Exception as e:
+        logger.error(f"Error executing research: {e}", exc_info=True)
+        raise AgentExecutionError(
+            agent_name="research",
+            message=f"Research execution failed: {str(e)}",
+            details={"session_id": request.session_id}
+        )
+    
+    # Ensure research_result is not None
+    if research_result is None:
+        logger.error(f"Research result is None for session {request.session_id}")
+        raise AgentExecutionError(
+            agent_name="research",
+            message="Research agent returned no result",
+            details={"session_id": request.session_id}
+        )
     
     if not research_result.get("success"):
         error_msg = research_result.get("error", "Research agent failed")
@@ -624,27 +675,27 @@ async def run_research(
             message="Research agent returned empty output",
             details={"session_id": request.session_id}
         )
-        
-        # Format response
-        result = {
-            "session_id": request.session_id,
-            "company_name": request.company_name,
-            "research_packet": research_output,
-            "insights": research_output.get("preparation_tips", []),
+    
+    # Format response
+    result = {
+        "session_id": request.session_id,
+        "company_name": request.company_name,
+        "research_packet": research_output,
+        "insights": research_output.get("preparation_tips", []),
+        "execution_time_ms": research_result.get("execution_time_ms", 0.0)
+    }
+    
+    # Update session
+    session_service.update_agent_state(
+        request.session_id,
+        "research",
+        {
+            "status": "completed",
+            "result": result,
             "execution_time_ms": research_result.get("execution_time_ms", 0.0)
         }
-        
-        # Update session
-        session_service.update_agent_state(
-            request.session_id,
-            "research",
-            {
-                "status": "completed",
-                "result": result,
-                "execution_time_ms": research_result.get("execution_time_ms", 0.0)
-            }
-        )
-        
+    )
+    
     return ResearchResponse(**result)
 
 
@@ -672,23 +723,23 @@ async def start_mock_interview(
             message="Session missing user_id",
             session_id=request.session_id
         )
-        
-        # Get job description from research results if available
-        agent_states = session.get("agent_states", {})
-        research_state = agent_states.get("research", {})
-        research_result = research_state.get("result", {})
-        job_description = research_result.get("research_packet", {}).get("company_overview", "")
-        
-        # Execute technical agent to select questions
-        technical_result = await orchestrator.execute_technical(
-            session_id=request.session_id,
-            user_id=user_id,
-            mode="select_questions",
-            job_description=job_description,
-            difficulty=request.difficulty,
-            num_questions=request.num_questions
-        )
-        
+    
+    # Get job description from research results if available
+    agent_states = session.get("agent_states", {})
+    research_state = agent_states.get("research", {})
+    research_result = research_state.get("result", {})
+    job_description = research_result.get("research_packet", {}).get("company_overview", "")
+    
+    # Execute technical agent to select questions
+    technical_result = await orchestrator.execute_technical(
+        session_id=request.session_id,
+        user_id=user_id,
+        mode="select_questions",
+        job_description=job_description,
+        difficulty=request.difficulty,
+        num_questions=request.num_questions
+    )
+    
     if not technical_result.get("success"):
         error_msg = technical_result.get("error", "Technical agent failed")
         raise AgentExecutionError(
@@ -707,19 +758,19 @@ async def start_mock_interview(
             message="No questions selected",
             details={"session_id": request.session_id}
         )
-        
-        # Update session
-        session_service.update_agent_state(
-            request.session_id,
-            "technical",
-            {
-                "status": "in_progress",
-                "questions": questions,
-                "current_question": 0,
-                "execution_time_ms": technical_result.get("execution_time_ms", 0.0)
-            }
-        )
-        
+    
+    # Update session
+    session_service.update_agent_state(
+        request.session_id,
+        "technical",
+        {
+            "status": "in_progress",
+            "questions": questions,
+            "current_question": 0,
+            "execution_time_ms": technical_result.get("execution_time_ms", 0.0)
+        }
+    )
+    
     return {
         "session_id": request.session_id,
         "status": "started",
@@ -750,17 +801,17 @@ async def submit_code(
             message="Session missing user_id",
             session_id=request.session_id
         )
-        
-        # Execute technical agent with code execution tool
-        technical_result = await orchestrator.execute_technical(
-            session_id=request.session_id,
-            user_id=user_id,
-            mode="evaluate_code",
-            question_id=request.question_id,
-            code=request.code,
-            language=request.language
-        )
-        
+    
+    # Execute technical agent with code execution tool
+    technical_result = await orchestrator.execute_technical(
+        session_id=request.session_id,
+        user_id=user_id,
+        mode="evaluate_code",
+        question_id=request.question_id,
+        code=request.code,
+        language=request.language
+    )
+    
     if not technical_result.get("success"):
         error_msg = technical_result.get("error", "Code evaluation failed")
         raise AgentExecutionError(
@@ -772,51 +823,51 @@ async def submit_code(
                 "language": request.language
             }
         )
-        
-        # Extract evaluation from result
-        tech_output = technical_result.get("output", {})
-        
-        # Format evaluation response
-        # The output format depends on how TechnicalAgent returns evaluation results
-        # If it's a string, parse it; if it's a dict, use it directly
-        if isinstance(tech_output, str):
-            # If output is a string (from agent), create a basic evaluation
-            evaluation = {
-                "session_id": request.session_id,
-                "question_id": request.question_id,
-                "status": "success",
-                "tests_passed": 0,
-                "total_tests": 0,
-                "feedback": tech_output,
-                "complexity_analysis": None,
-                "execution_time_ms": technical_result.get("execution_time_ms", 0.0)
-            }
-        else:
-            # If output is a dict, use it
-            evaluation = {
-                "session_id": request.session_id,
-                "question_id": request.question_id,
-                "status": tech_output.get("status", "success"),
-                "tests_passed": tech_output.get("tests_passed", tech_output.get("testsPassed", 0)),
-                "total_tests": tech_output.get("total_tests", tech_output.get("totalTests", 0)),
-                "feedback": tech_output.get("feedback", ""),
-                "complexity_analysis": tech_output.get("complexity_analysis"),
-                "execution_time_ms": technical_result.get("execution_time_ms", 0.0)
-            }
-        
-        # Store submission in session
-        session_service.add_artifact(
-            request.session_id,
-            "code_submission",
-            {
-                "question_id": request.question_id,
-                "code": request.code,
-                "language": request.language,
-                "evaluation": evaluation,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        )
-        
+    
+    # Extract evaluation from result
+    tech_output = technical_result.get("output", {})
+    
+    # Format evaluation response
+    # The output format depends on how TechnicalAgent returns evaluation results
+    # If it's a string, parse it; if it's a dict, use it directly
+    if isinstance(tech_output, str):
+        # If output is a string (from agent), create a basic evaluation
+        evaluation = {
+            "session_id": request.session_id,
+            "question_id": request.question_id,
+            "status": "success",
+            "tests_passed": 0,
+            "total_tests": 0,
+            "feedback": tech_output,
+            "complexity_analysis": None,
+            "execution_time_ms": technical_result.get("execution_time_ms", 0.0)
+        }
+    else:
+        # If output is a dict, use it
+        evaluation = {
+            "session_id": request.session_id,
+            "question_id": request.question_id,
+            "status": tech_output.get("status", "success"),
+            "tests_passed": tech_output.get("tests_passed", tech_output.get("testsPassed", 0)),
+            "total_tests": tech_output.get("total_tests", tech_output.get("totalTests", 0)),
+            "feedback": tech_output.get("feedback", ""),
+            "complexity_analysis": tech_output.get("complexity_analysis"),
+            "execution_time_ms": technical_result.get("execution_time_ms", 0.0)
+        }
+    
+    # Store submission in session
+    session_service.add_artifact(
+        request.session_id,
+        "code_submission",
+        {
+            "question_id": request.question_id,
+            "code": request.code,
+            "language": request.language,
+            "evaluation": evaluation,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    )
+    
     return EvaluationResponse(**evaluation)
 
 
@@ -918,6 +969,14 @@ async def get_storage_stats(
         if isinstance(session_service, PersistentSessionService):
             stats = session_service.get_storage_stats()
             return stats
+        elif isinstance(session_service, ADKSessionService):
+            # ADK session service stats
+            return {
+                "storage_type": "database" if session_service.service.__class__.__name__ == "DatabaseSessionService" else "in-memory",
+                "total_sessions": len(session_service.sessions) if hasattr(session_service, 'sessions') else 0,
+                "active_sessions": len(session_service.sessions) if hasattr(session_service, 'sessions') else 0,
+                "persistence_enabled": True
+            }
         else:
             return {
                 "storage_type": "in-memory",

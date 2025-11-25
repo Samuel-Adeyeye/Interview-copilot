@@ -18,7 +18,8 @@ pydantic-settings>=2.5.0
 
 # Database & Memory
 sqlalchemy>=2.0.0
-psycopg2-binary>=2.9.0
+psycopg2-binary>=2.9.0  # For legacy/sync operations
+psycopg[binary]>=3.1.0  # Async PostgreSQL driver for ADK DatabaseSessionService
 chromadb>=0.5.0
 # OR: qdrant-client>=1.11.0
 

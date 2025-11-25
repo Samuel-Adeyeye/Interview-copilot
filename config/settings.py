@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     
     # Session Persistence
     SESSION_PERSISTENCE_ENABLED: bool = True
-    SESSION_STORAGE_TYPE: str = "file"  # "file" or "sqlite"
-    SESSION_STORAGE_PATH: str = "./data/sessions"
+    SESSION_STORAGE_TYPE: str = "file"  # "file", "sqlite", or "database" (PostgreSQL via ADK)
+    SESSION_STORAGE_PATH: str = "./data/sessions"  # Path for file/sqlite, or DATABASE_URL for database
     SESSION_EXPIRATION_HOURS: int = 168  # 7 days default
     
     # LLM Settings (Legacy - OpenAI)
