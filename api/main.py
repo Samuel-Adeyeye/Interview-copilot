@@ -14,11 +14,36 @@ import logging
 import asyncio
 from contextlib import asynccontextmanager
 
-from langchain_openai import ChatOpenAI
-from agents.research_agent import ResearchAgentStructured
-from agents.technical_agent import TechnicalAgent
-from agents.companion_agent import CompanionAgent
-from agents.orchestrator import Orchestrator
+# Configure logging first
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Import settings
+from config.settings import settings
+
+# Conditional imports based on available API keys
+# Try to import ADK agents (preferred)
+try:
+    from agents.adk.research_agent import create_research_agent
+    from agents.adk.technical_agent import create_technical_agent
+    from agents.adk.companion_agent import create_companion_agent
+    from agents.adk.orchestrator import ADKOrchestrator
+    ADK_AVAILABLE = True
+except ImportError as e:
+    ADK_AVAILABLE = False
+    logger.warning(f"ADK agents not available: {e}. Will use LangChain agents if OpenAI key is provided.")
+
+# LangChain agents (fallback)
+try:
+    from langchain_openai import ChatOpenAI
+    from agents.research_agent import ResearchAgentStructured
+    from agents.technical_agent import TechnicalAgent
+    from agents.companion_agent import CompanionAgent
+    from agents.orchestrator import Orchestrator
+    LANGCHAIN_AVAILABLE = True
+except ImportError as e:
+    LANGCHAIN_AVAILABLE = False
+    logger.warning(f"LangChain agents not available: {e}")
 from memory.memory_bank import MemoryBank
 from memory.session_service import InMemorySessionService
 from memory.persistent_session_service import PersistentSessionService
@@ -37,11 +62,6 @@ from exceptions import (
     AgentExecutionError,
     APIError
 )
-from config.settings import settings
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 
 # ============= Pydantic Models =============
@@ -227,79 +247,146 @@ async def lifespan(app: FastAPI):
         app_state.observability = ObservabilityService()
         logger.info("✅ Core services initialized")
         
-        # Initialize LLM
-        logger.info(f"Initializing LLM (model: {settings.LLM_MODEL})...")
-        llm = ChatOpenAI(
-            model=settings.LLM_MODEL,
-            temperature=settings.LLM_TEMPERATURE,
-            api_key=settings.OPENAI_API_KEY
-        )
-        logger.info("✅ LLM initialized")
+        # Determine which API to use (prefer Google/ADK over OpenAI)
+        use_adk = ADK_AVAILABLE and settings.GOOGLE_API_KEY
+        use_openai = LANGCHAIN_AVAILABLE and settings.OPENAI_API_KEY
         
-        # Initialize tools
-        logger.info("Initializing tools...")
-        try:
-            search_tool = create_search_tool()
-            logger.info("✅ Search tool initialized")
-        except Exception as e:
-            logger.warning(f"⚠️  Search tool initialization failed: {e}. Continuing without search.")
-            search_tool = None
-        
-        try:
-            code_exec_tool = create_code_exec_tool(settings.JUDGE0_API_KEY)
-            logger.info("✅ Code execution tool initialized")
-        except Exception as e:
-            logger.warning(f"⚠️  Code execution tool initialization failed: {e}. Continuing without code execution.")
-            code_exec_tool = None
-        
-        # Initialize question bank
-        logger.info("Loading question bank...")
-        try:
-            question_bank = QuestionBank("data/questions_bank.json")
-            logger.info(f"✅ Question bank loaded ({question_bank.get_question_count()} questions)")
-        except Exception as e:
-            logger.error(f"❌ Failed to load question bank: {e}")
-            raise
-        
-        # Initialize agents
-        logger.info("Initializing agents...")
-        try:
-            research_agent = ResearchAgentStructured(llm, app_state.memory_bank)
-            logger.info("✅ Research agent initialized")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize research agent: {e}")
-            raise
-        
-        try:
-            if code_exec_tool is None:
-                logger.warning("⚠️  Technical agent initialized without code execution tool")
-            technical_agent = TechnicalAgent(llm, code_exec_tool, question_bank)
-            logger.info("✅ Technical agent initialized")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize technical agent: {e}")
-            raise
-        
-        try:
-            companion_agent = CompanionAgent(llm, app_state.memory_bank)
-            logger.info("✅ Companion agent initialized")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize companion agent: {e}")
-            raise
-        
-        # Initialize orchestrator
-        logger.info("Initializing orchestrator...")
-        try:
-            app_state.orchestrator = Orchestrator(
-                research_agent=research_agent,
-                technical_agent=technical_agent,
-                companion_agent=companion_agent,
-                session_service=app_state.session_service,
-                memory_bank=app_state.memory_bank
+        if not use_adk and not use_openai:
+            raise ValueError(
+                "No API key configured. Please set either GOOGLE_API_KEY (preferred) or OPENAI_API_KEY in your .env file."
             )
-            logger.info("✅ Orchestrator initialized")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize orchestrator: {e}")
-            raise
+        
+        if use_adk:
+            logger.info("🚀 Using ADK/Gemini agents (GOOGLE_API_KEY detected)")
+            logger.info(f"Using ADK model: {settings.ADK_MODEL}")
+            
+            # Initialize ADK agents
+            logger.info("Initializing ADK agents...")
+            try:
+                research_agent = create_research_agent()
+                logger.info("✅ ADK Research agent initialized")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize ADK research agent: {e}")
+                raise
+            
+            try:
+                technical_agent = create_technical_agent(
+                    use_builtin_code_executor=True,  # Use built-in executor (no Judge0 needed)
+                    judge0_api_key=settings.JUDGE0_API_KEY  # Optional, for multi-language support
+                )
+                logger.info("✅ ADK Technical agent initialized")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize ADK technical agent: {e}")
+                raise
+            
+            try:
+                companion_agent = create_companion_agent(memory_bank=app_state.memory_bank)
+                logger.info("✅ ADK Companion agent initialized")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize ADK companion agent: {e}")
+                raise
+            
+            # Initialize ADK orchestrator
+            logger.info("Initializing ADK orchestrator...")
+            try:
+                app_state.orchestrator = ADKOrchestrator(
+                    research_agent=research_agent,
+                    technical_agent=technical_agent,
+                    companion_agent=companion_agent,
+                    session_service=app_state.session_service,
+                    memory_bank=app_state.memory_bank,
+                    use_sequential=True,
+                    use_builtin_code_executor=True,
+                    judge0_api_key=settings.JUDGE0_API_KEY
+                )
+                logger.info("✅ ADK Orchestrator initialized")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize ADK orchestrator: {e}")
+                raise
+            
+            # Store agent type for reference
+            app_state.agent_type = "adk"
+            
+        elif use_openai:
+            logger.info("⚠️  Using LangChain/OpenAI agents (OPENAI_API_KEY detected)")
+            logger.info(f"Using OpenAI model: {settings.LLM_MODEL}")
+            
+            # Initialize LLM
+            logger.info(f"Initializing LLM (model: {settings.LLM_MODEL})...")
+            llm = ChatOpenAI(
+                model=settings.LLM_MODEL,
+                temperature=settings.LLM_TEMPERATURE,
+                api_key=settings.OPENAI_API_KEY
+            )
+            logger.info("✅ LLM initialized")
+            
+            # Initialize tools
+            logger.info("Initializing tools...")
+            try:
+                search_tool = create_search_tool()
+                logger.info("✅ Search tool initialized")
+            except Exception as e:
+                logger.warning(f"⚠️  Search tool initialization failed: {e}. Continuing without search.")
+                search_tool = None
+            
+            try:
+                code_exec_tool = create_code_exec_tool(settings.JUDGE0_API_KEY)
+                logger.info("✅ Code execution tool initialized")
+            except Exception as e:
+                logger.warning(f"⚠️  Code execution tool initialization failed: {e}. Continuing without code execution.")
+                code_exec_tool = None
+            
+            # Initialize question bank
+            logger.info("Loading question bank...")
+            try:
+                question_bank = QuestionBank("data/questions_bank.json")
+                logger.info(f"✅ Question bank loaded ({question_bank.get_question_count()} questions)")
+            except Exception as e:
+                logger.error(f"❌ Failed to load question bank: {e}")
+                raise
+            
+            # Initialize agents
+            logger.info("Initializing agents...")
+            try:
+                research_agent = ResearchAgentStructured(llm, app_state.memory_bank)
+                logger.info("✅ Research agent initialized")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize research agent: {e}")
+                raise
+            
+            try:
+                if code_exec_tool is None:
+                    logger.warning("⚠️  Technical agent initialized without code execution tool")
+                technical_agent = TechnicalAgent(llm, code_exec_tool, question_bank)
+                logger.info("✅ Technical agent initialized")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize technical agent: {e}")
+                raise
+            
+            try:
+                companion_agent = CompanionAgent(llm, app_state.memory_bank)
+                logger.info("✅ Companion agent initialized")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize companion agent: {e}")
+                raise
+            
+            # Initialize orchestrator
+            logger.info("Initializing orchestrator...")
+            try:
+                app_state.orchestrator = Orchestrator(
+                    research_agent=research_agent,
+                    technical_agent=technical_agent,
+                    companion_agent=companion_agent,
+                    session_service=app_state.session_service,
+                    memory_bank=app_state.memory_bank
+                )
+                logger.info("✅ Orchestrator initialized")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize orchestrator: {e}")
+                raise
+            
+            # Store agent type for reference
+            app_state.agent_type = "langchain"
         
         # Mark as initialized
         app_state.initialized = True

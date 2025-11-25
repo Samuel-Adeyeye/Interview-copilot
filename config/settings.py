@@ -3,12 +3,12 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # API Keys
-    OPENAI_API_KEY: str  # Legacy - will be replaced by GOOGLE_API_KEY
+    OPENAI_API_KEY: Optional[str] = None  # Legacy - optional, use GOOGLE_API_KEY instead
     TAVILY_API_KEY: Optional[str] = None  # Legacy - ADK uses google_search
     JUDGE0_API_KEY: Optional[str] = None  # Optional - can use BuiltInCodeExecutor
     
-    # Google ADK API Keys
-    GOOGLE_API_KEY: Optional[str] = None  # Required for ADK/Gemini
+    # Google ADK API Keys (Preferred)
+    GOOGLE_API_KEY: Optional[str] = None  # Required for ADK/Gemini - preferred over OpenAI
     
     # Database
     DATABASE_URL: str = "postgresql://user:pass@localhost:5432/interview_copilot"
