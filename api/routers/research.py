@@ -1,15 +1,14 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import uuid
 import logging
 from pydantic import BaseModel
-from api.main import (
+from api.dependencies import (
     get_session_service,
     get_memory_bank,
-    get_orchestrator,
-    JobDescriptionRequest,
-    ResearchRequest,
-    ResearchResponse,
+    get_orchestrator
+)
+from exceptions import (
     SessionNotFoundError,
     SessionError,
     AgentExecutionError
@@ -17,6 +16,27 @@ from api.main import (
 
 router = APIRouter(tags=["research"])
 logger = logging.getLogger(__name__)
+
+# ===== Models =====
+
+class JobDescriptionRequest(BaseModel):
+    job_title: str
+    company_name: str
+    jd_text: str
+
+class ResearchRequest(BaseModel):
+    session_id: str
+    job_description: str
+    company_name: str
+
+class ResearchResponse(BaseModel):
+    session_id: str
+    company_name: str
+    research_packet: Dict[str, Any]
+    insights: List[str]
+    execution_time_ms: float
+
+# ===== Endpoints =====
 
 @router.post("/job-descriptions/upload")
 async def upload_job_description(

@@ -384,3 +384,129 @@ class InterviewCoPilotSyncClient:
         )
         response.raise_for_status()
         return response.json()
+    
+    # ===== ADK v2 Streaming Endpoints =====
+    
+    def run_research_streaming(
+        self,
+        session_id: str,
+        company_name: str,
+        job_description: str,
+        user_id: str = None
+    ):
+        """
+        Run research agent using ADK v2 streaming endpoint.
+        Yields text chunks as they arrive.
+        """
+        import json
+        
+        with self._get_session().stream(
+            "POST",
+            f"{self.base_url}/api/v2/adk/research",
+            json={
+                "session_id": session_id,
+                "company_name": company_name,
+                "job_description": job_description,
+                "user_id": user_id
+            },
+            timeout=120.0  # Longer timeout for streaming
+        ) as response:
+            response.raise_for_status()
+            
+            # Parse Server-Sent Events
+            for line in response.iter_lines():
+                if line.startswith("data: "):
+                    data_str = line[6:]  # Remove "data: " prefix
+                    try:
+                        data = json.loads(data_str)
+                        if data.get("type") == "chunk":
+                            yield data.get("text", "")
+                        elif data.get("type") == "complete":
+                            # Final complete response
+                            break
+                    except json.JSONDecodeError:
+                        continue
+    
+    def start_mock_interview_streaming(
+        self,
+        session_id: str,
+        user_id: str,
+        difficulty: str = "medium",
+        num_questions: int = 3,
+        job_description: str = None
+    ):
+        """
+        Start mock interview using ADK v2 streaming endpoint.
+        Yields text chunks as they arrive.
+        """
+        import json
+        
+        with self._get_session().stream(
+            "POST",
+            f"{self.base_url}/api/v2/adk/technical",
+            json={
+                "session_id": session_id,
+                "user_id": user_id,
+                "mode": "select_questions",
+                "difficulty": difficulty,
+                "num_questions": num_questions,
+                "job_description": job_description
+            },
+            timeout=120.0
+        ) as response:
+            response.raise_for_status()
+            
+            # Parse Server-Sent Events
+            for line in response.iter_lines():
+                if line.startswith("data: "):
+                    data_str = line[6:]
+                    try:
+                        data = json.loads(data_str)
+                        if data.get("type") == "chunk":
+                            yield data.get("text", "")
+                        elif data.get("type") == "complete":
+                            break
+                    except json.JSONDecodeError:
+                        continue
+    
+    def submit_code_streaming(
+        self,
+        session_id: str,
+        user_id: str,
+        question_id: str,
+        code: str,
+        language: str = "python"
+    ):
+        """
+        Submit code for evaluation using ADK v2 streaming endpoint.
+        Yields text chunks as they arrive.
+        """
+        import json
+        
+        with self._get_session().stream(
+            "POST",
+            f"{self.base_url}/api/v2/adk/technical",
+            json={
+                "session_id": session_id,
+                "user_id": user_id,
+                "mode": "evaluate_code",
+                "question_id": question_id,
+                "code": code,
+                "language": language
+            },
+            timeout=120.0
+        ) as response:
+            response.raise_for_status()
+            
+            # Parse Server-Sent Events
+            for line in response.iter_lines():
+                if line.startswith("data: "):
+                    data_str = line[6:]
+                    try:
+                        data = json.loads(data_str)
+                        if data.get("type") == "chunk":
+                            yield data.get("text", "")
+                        elif data.get("type") == "complete":
+                            break
+                    except json.JSONDecodeError:
+                        continue

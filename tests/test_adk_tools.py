@@ -45,7 +45,7 @@ class TestADKCodeExecTool:
             # Should create BuiltInCodeExecutor instance
             assert executor is not None
     
-    @patch('tools.adk.code_exec_tool.CodeExecutionTool')
+    @patch('tools.code_exec_tool.CodeExecutionTool')
     @patch('tools.adk.code_exec_tool.FunctionTool')
     def test_create_judge0_code_exec_tool(self, mock_function_tool, mock_code_exec):
         """Test creating Judge0 code execution tool"""

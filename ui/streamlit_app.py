@@ -177,24 +177,30 @@ with tab1:
             if not jd_text:
                 st.error("Please enter a job description")
             elif client:
-                with st.spinner("🔍 Researching company and interview process..."):
-                    try:
-                        result = client.run_research(
-                            st.session_state.session_id,
-                            jd_text,
-                            company_name
-                        )
-                        
-                        st.success("✅ Research complete!")
-                        
-                        # Display research results
-                        with st.expander("📊 Research Results", expanded=True):
-                            if isinstance(result, dict):
-                                st.json(result)
-                            else:
-                                st.write(result)
-                    except Exception as e:
-                        st.error(f"Research failed: {e}")
+                # Create a placeholder for streaming output
+                output_placeholder = st.empty()
+                full_response = ""
+                
+                try:
+                    with st.spinner("🔍 Researching company and interview process..."):
+                        # Use streaming endpoint
+                        for chunk in client.run_research_streaming(
+                            session_id=st.session_state.session_id,
+                            company_name=company_name,
+                            job_description=jd_text,
+                            user_id=st.session_state.get("user_id", "demo_user")
+                        ):
+                            full_response += chunk
+                            # Update display in real-time
+                            output_placeholder.markdown(f"**Research Results:**\n\n{full_response}")
+                    
+                    st.success("✅ Research complete!")
+                    
+                    # Store in session state
+                    st.session_state["research_results"] = full_response
+                    
+                except Exception as e:
+                    st.error(f"Research failed: {e}")
     
     # Display parsed JD if available
     if jd_text and use_llm_parsing:
@@ -230,22 +236,31 @@ with tab2:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🚀 Start Interview", use_container_width=True, type="primary"):
                 if client:
-                    with st.spinner("🎯 Selecting questions..."):
-                        try:
-                            result = client.start_mock_interview(
-                                st.session_state.session_id,
-                                difficulty,
-                                num_questions
-                            )
-                            
-                            if result and result.get('questions'):
-                                st.session_state.current_questions = result.get('questions', [])
-                                st.session_state.current_question_index = 0
-                                st.session_state.evaluation_results = {}
-                                st.success(f"✅ Interview started with {len(st.session_state.current_questions)} questions!")
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed to start interview: {e}")
+                    # Create placeholder for streaming output
+                    output_placeholder = st.empty()
+                    full_response = ""
+                    
+                    try:
+                        with st.spinner("🎯 Selecting questions..."):
+                            # Use streaming endpoint
+                            for chunk in client.start_mock_interview_streaming(
+                                session_id=st.session_state.session_id,
+                                user_id=st.session_state.get("user_id", "demo_user"),
+                                difficulty=difficulty,
+                                num_questions=num_questions,
+                                job_description=st.session_state.get("research_results", "")
+                            ):
+                                full_response += chunk
+                                # Update display in real-time
+                                output_placeholder.markdown(f"**Generating Questions:**\n\n{full_response}")
+                        
+                        # Parse questions from response (assuming they're in the text)
+                        # For now, store the full response
+                        st.session_state["interview_questions"] = full_response
+                        st.success(f"✅ Interview questions generated!")
+                        
+                    except Exception as e:
+                        st.error(f"Failed to start interview: {e}")
     
     # Display current question
     if st.session_state.current_questions:

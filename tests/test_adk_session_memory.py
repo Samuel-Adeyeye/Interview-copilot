@@ -39,16 +39,16 @@ class TestADKSessionService:
         from memory.adk.session_service import create_adk_session_service
         
         # Mock ADK session service
-        mock_adk_service = AsyncMock()
+        mock_adk_service = Mock()
         mock_session = Mock()
         mock_session.state = {}
-        mock_adk_service.create_session = AsyncMock(return_value=mock_session)
+        mock_adk_service.create_session = Mock(return_value=mock_session)
         mock_service.return_value = mock_adk_service
         
         service = create_adk_session_service(use_database=False)
         service.service = mock_adk_service
         
-        session = await service.create_session(
+        session = service.create_session(
             session_id="test_session",
             user_id="test_user",
             metadata={"test": True}
@@ -64,17 +64,17 @@ class TestADKSessionService:
         from memory.adk.session_service import create_adk_session_service
         
         # Mock ADK session service
-        mock_adk_service = AsyncMock()
+        mock_adk_service = Mock()
         mock_session = Mock()
         mock_session.state = {"metadata": {}}
         mock_session.user_id = "test_user"
-        mock_adk_service.get_session = AsyncMock(return_value=mock_session)
+        mock_adk_service.get_session = Mock(return_value=mock_session)
         mock_service.return_value = mock_adk_service
         
         service = create_adk_session_service(use_database=False)
         service.service = mock_adk_service
         
-        session = await service.get_session("test_session")
+        session = service.get_session("test_session")
         
         assert session is not None
 

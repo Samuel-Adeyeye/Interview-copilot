@@ -77,9 +77,9 @@ class ADKOrchestrator:
             self.workflow = self._create_llm_orchestrator()
         
         # Create runner for execution
+        workflow_app = App(name="interview_copilot", root_agent=self.workflow)
         self.runner = InMemoryRunner(
-            agent=self.workflow,
-            app_name="interview_copilot"  # Match the app name used in session service
+            app=workflow_app
         )
         
         logger.info("✅ ADK Orchestrator created")
@@ -194,7 +194,7 @@ Job Description context:
             from google.adk.apps import App
             
             # Create app with research agent
-            app = App(agent=self.research_agent)
+            app = App(name="research_app", root_agent=self.research_agent)
             
             # Use Runner with our session service if available
             if self.session_service and hasattr(self.session_service, 'service'):
@@ -204,6 +204,7 @@ Job Description context:
                     # Try to get session, create if it doesn't exist
                     session = await adk_session_service.get_session(
                         app_name="interview_copilot",
+                        user_id=user_id,
                         session_id=session_id
                     )
                     if not session:
@@ -220,25 +221,35 @@ Job Description context:
                 # ADK session service
                 runner = Runner(
                     app=app,
-                    session_service=adk_session_service,
-                    app_name="interview_copilot"
+                    session_service=adk_session_service
                 )
             else:
                 # Fallback to InMemoryRunner if no session service
                 runner = InMemoryRunner(
-                    agent=self.research_agent,
-                    app_name="agents"  # Use default to avoid mismatch
+                    app=app
                 )
             
             result_text = None
             all_text_parts = []
             
+            # Determine session ID to use with runner
+            # If using InMemoryRunner, we need to use a fresh session since it has its own storage
+            runner_session_id = session_id
+            runner_user_id = user_id
+            
+            # If we're using InMemoryRunner (no session service), create a temporary session
+            if not (self.session_service and hasattr(self.session_service, 'service')):
+                # InMemoryRunner has its own session storage, so we use a temp ID
+                import uuid
+                runner_session_id = f"temp_{uuid.uuid4()}"
+                logger.info(f"Using temporary session ID for InMemoryRunner: {runner_session_id}")
+            
             try:
                 # Run the agent and collect all text responses
                 event_count = 0
                 async for event in runner.run_async(
-                    user_id=user_id,
-                    session_id=session_id,
+                    user_id=runner_user_id,
+                    session_id=runner_session_id,
                     new_message=query
                 ):
                     event_count += 1
@@ -390,27 +401,38 @@ Use get_question_by_id() to get test cases, then execute the code and provide co
             from google.adk.apps import App
             
             # Create app with technical agent
-            app = App(agent=self.technical_agent)
+            app = App(name="technical_app", root_agent=self.technical_agent)
             
             # Use Runner with our session service if available
             if self.session_service and hasattr(self.session_service, 'service'):
                 # ADK session service
                 runner = Runner(
                     app=app,
-                    session_service=self.session_service.service,
-                    app_name="interview_copilot"
+                    session_service=self.session_service.service
                 )
             else:
                 # Fallback to InMemoryRunner if no session service
                 runner = InMemoryRunner(
-                    agent=self.technical_agent,
-                    app_name="agents"  # Use default to avoid mismatch
+                    app=app
                 )
+            
+            
+            # Determine session ID to use with runner
+            # If using InMemoryRunner, we need to use a fresh session since it has its own storage
+            runner_session_id = session_id
+            runner_user_id = user_id
+            
+            # If we're using InMemoryRunner (no session service), create a temporary session
+            if not (self.session_service and hasattr(self.session_service, 'service')):
+                # InMemoryRunner has its own session storage, so we use a temp ID
+                import uuid
+                runner_session_id = f"temp_{uuid.uuid4()}"
+                logger.info(f"Using temporary session ID for InMemoryRunner: {runner_session_id}")
             
             result = None
             async for event in runner.run_async(
-                user_id=user_id,
-                session_id=session_id,
+                user_id=runner_user_id,
+                session_id=runner_session_id,
                 new_message=query
             ):
                 if event.content and event.content.parts:

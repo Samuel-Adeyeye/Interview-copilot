@@ -1,13 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 from pydantic import BaseModel
-from api.main import (
+from api.dependencies import (
     get_session_service,
-    get_orchestrator,
-    MockInterviewStartRequest,
-    CodeSubmissionRequest,
-    EvaluationResponse,
+    get_orchestrator
+)
+from exceptions import (
     SessionNotFoundError,
     SessionError,
     AgentExecutionError
@@ -15,6 +14,30 @@ from api.main import (
 
 router = APIRouter(tags=["interview"])
 logger = logging.getLogger(__name__)
+
+# ===== Models =====
+
+class MockInterviewStartRequest(BaseModel):
+    session_id: str
+    difficulty: str = "medium"
+    num_questions: int = 3
+
+class CodeSubmissionRequest(BaseModel):
+    session_id: str
+    question_id: str
+    code: str
+    language: str = "python"
+
+class EvaluationResponse(BaseModel):
+    session_id: str
+    question_id: str
+    status: str
+    tests_passed: int
+    total_tests: int
+    feedback: str
+    execution_time_ms: float
+
+# ===== Endpoints =====
 
 @router.post("/interview/start")
 async def start_mock_interview(

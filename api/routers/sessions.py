@@ -1,17 +1,29 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import uuid
 import logging
 from pydantic import BaseModel
-from api.main import (
-    get_session_service,
-    SessionCreateRequest,
-    SessionResponse,
-    SessionNotFoundError
-)
+from api.dependencies import get_session_service
+from exceptions import SessionNotFoundError
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 logger = logging.getLogger(__name__)
+
+# ===== Models =====
+
+class SessionCreateRequest(BaseModel):
+    user_id: str
+    metadata: Optional[Dict[str, Any]] = None
+
+class SessionResponse(BaseModel):
+    session_id: str
+    user_id: str
+    state: str
+    created_at: str
+    metadata: Dict[str, Any]
+    stats: Optional[Dict[str, Any]] = None
+
+# ===== Endpoints =====
 
 @router.post("/create", response_model=SessionResponse)
 async def create_session(
@@ -99,15 +111,12 @@ async def resume_session(
     Resume a paused session
     """
     try:
-        session = session_service.get_session(session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-        
-        session_service.resume_session(session_id)
+        if not session_service.resume_session(session_id):
+            raise SessionNotFoundError(session_id=session_id)
         
         return {
             "session_id": session_id,
-            "status": "running",
+            "status": "resumed",
             "message": "Session resumed successfully"
         }
     
@@ -115,4 +124,33 @@ async def resume_session(
         raise
     except Exception as e:
         logger.error(f"Error resuming session: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{session_id}/summary")
+async def get_session_summary(
+    session_id: str,
+    session_service = Depends(get_session_service)
+):
+    """
+    Get comprehensive session summary
+    """
+    try:
+        session = session_service.get_session(session_id)
+        if not session:
+            raise SessionNotFoundError(session_id=session_id)
+        
+        # In a real app, we would aggregate data from various agents
+        return {
+            "session_id": session_id,
+            "status": session.get("state", "unknown"),
+            "duration_seconds": 0,  # Mock
+            "tasks_completed": 0,   # Mock
+            "performance_score": 0  # Mock
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting session summary: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

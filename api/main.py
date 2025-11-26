@@ -53,52 +53,7 @@ class ApplicationState:
 app_state = ApplicationState()
 
 
-async def get_session_service():
-    """Dependency to get session service"""
-    if not app_state.initialized:
-        raise ServiceUnavailableError(
-            service_name="session_service",
-            message="Service not initialized. Please wait for the API to finish starting up."
-        )
-    if app_state.session_service is None:
-        logger.error("Session service is None but app is marked as initialized")
-        raise ServiceUnavailableError(
-            service_name="session_service",
-            message="Session service is not available"
-        )
-    return app_state.session_service
-
-
-async def get_memory_bank():
-    """Dependency to get memory bank"""
-    if not app_state.initialized:
-        raise ServiceUnavailableError(
-            service_name="memory_bank",
-            message="Service not initialized. Please wait for the API to finish starting up."
-        )
-    if app_state.memory_bank is None:
-        logger.error("Memory bank is None but app is marked as initialized")
-        raise ServiceUnavailableError(
-            service_name="memory_bank",
-            message="Memory bank is not available"
-        )
-    return app_state.memory_bank
-
-
-async def get_orchestrator():
-    """Dependency to get orchestrator"""
-    if not app_state.initialized:
-        raise ServiceUnavailableError(
-            service_name="orchestrator",
-            message="Service not initialized. Please wait for the API to finish starting up."
-        )
-    if app_state.orchestrator is None:
-        logger.error("Orchestrator is None but app is marked as initialized")
-        raise ServiceUnavailableError(
-            service_name="orchestrator",
-            message="Orchestrator is not available"
-        )
-    return app_state.orchestrator
+# ============= Lifespan Management =============
 
 
 # ============= Lifespan Management =============
@@ -211,9 +166,12 @@ async def lifespan(app: FastAPI):
         
         logger.info("✅ Health checks passed")
         
-        # Store observability in app state for middleware access
+        # Store services in app state for dependencies
+        app.state.session_service = app_state.session_service
+        app.state.memory_bank = app_state.memory_bank
+        app.state.orchestrator = app_state.orchestrator
         app.state.observability = app_state.observability
-        logger.info("✅ Observability service stored in app state")
+        logger.info("✅ Services stored in app state")
         
         # Start background cleanup task for session expiration
         if isinstance(app_state.session_service, (PersistentSessionService, ADKSessionService)):
@@ -281,17 +239,27 @@ async def lifespan(app: FastAPI):
         
         logger.info("✅ Shutdown complete")
     except Exception as e:
-        logger.error(f"Error during shutdown: {e}")
+        logger.error(f"❌ Failed to initialize services: {e}")
+        app_state.initialized = False
+        raise
 
 
-# ============= FastAPI App =============
+from api.routers import sessions, research, interview, users
+
+# ============= App Initialization =============
 
 app = FastAPI(
     title="Interview Co-Pilot API",
-    description="Multi-agent system for interview preparation with code execution",
-    version="1.0.0",
+    description="Backend API for the Multi-Agent Interview Co-Pilot",
+    version="2.0.0",
     lifespan=lifespan
 )
+
+# Include routers
+app.include_router(sessions.router)
+app.include_router(research.router)
+app.include_router(interview.router)
+app.include_router(users.router)
 
 # CORS middleware
 app.add_middleware(
@@ -322,15 +290,6 @@ try:
     logger.info("✅ ADK endpoints included")
 except ImportError as e:
     logger.warning(f"⚠️  ADK endpoints not available: {e}")
-
-# Include refactored routers
-from api.routers.sessions import router as sessions_router
-from api.routers.research import router as research_router
-from api.routers.interview import router as interview_router
-
-app.include_router(sessions_router)
-app.include_router(research_router)
-app.include_router(interview_router)
 
 # Error handler middleware (should be last to catch all errors)
 @app.middleware("http")
