@@ -202,6 +202,11 @@ with tab1:
                 except Exception as e:
                     st.error(f"Research failed: {e}")
     
+    # Display research results if available
+    if "research_results" in st.session_state and st.session_state["research_results"]:
+        with st.expander("📊 Research Results", expanded=True):
+            st.markdown(st.session_state["research_results"])
+    
     # Display parsed JD if available
     if jd_text and use_llm_parsing:
         with st.expander("📋 Parsed Job Description"):
@@ -261,6 +266,11 @@ with tab2:
                         
                     except Exception as e:
                         st.error(f"Failed to start interview: {e}")
+    
+    # Display interview questions if available
+    if "interview_questions" in st.session_state and st.session_state["interview_questions"]:
+        with st.expander("💡 Interview Questions", expanded=True):
+            st.markdown(st.session_state["interview_questions"])
     
     # Display current question
     if st.session_state.current_questions:

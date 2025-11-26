@@ -123,6 +123,29 @@ class ADKApplication:
         """
         from google.genai import types
         
+        # Ensure session exists in the runner's session service
+        # This is necessary when using InMemorySessionService which has isolated storage
+        try:
+            session_service = self.runner.session_service
+            
+            # Try to get the session
+            existing_session = await session_service.get_session(
+                app_name="interview_copilot",
+                user_id=user_id,
+                session_id=session_id
+            )
+            
+            # If session doesn't exist, create it
+            if not existing_session:
+                logger.info(f"Creating session {session_id} in runner's session service")
+                await session_service.create_session(
+                    app_name="interview_copilot",
+                    user_id=user_id,
+                    session_id=session_id
+                )
+        except Exception as e:
+            logger.warning(f"Could not ensure session exists: {e}, continuing anyway")
+        
         # Create user message
         query = types.Content(
             role="user",
@@ -232,18 +255,55 @@ def get_adk_app() -> ADKApplication:
     """
     Get or create the global ADK application instance.
     
+    Uses the shared orchestrator from app_state to ensure session consistency.
+    
     Returns:
         ADKApplication instance
     """
     global _adk_app
     
     if _adk_app is None:
-        _adk_app = ADKApplication(
-            use_sequential_orchestrator=True,
-            use_builtin_code_executor=True
-        )
+        # Import here to avoid circular dependency
+        from api.main import app_state
+        
+        # Use the shared orchestrator from app_state if available
+        if app_state.orchestrator and app_state.session_service:
+            logger.info("Using shared orchestrator and session service from app_state")
+            
+            # Create a minimal ADKApplication that uses the shared services
+            _adk_app = ADKApplication.__new__(ADKApplication)
+            _adk_app.session_service = app_state.session_service
+            _adk_app.memory_service = app_state.memory_bank
+            _adk_app.orchestrator = app_state.orchestrator
+            
+            # Create ADK App from the shared orchestrator
+            _adk_app.app = App(
+                name="interview_copilot",
+                root_agent=app_state.orchestrator.workflow,
+                events_compaction_config=EventsCompactionConfig(
+                    compaction_interval=5,
+                    overlap_size=2
+                )
+            )
+            
+            # Create Runner with the shared session service
+            adk_session_service = app_state.session_service.service if hasattr(app_state.session_service, 'service') else app_state.session_service
+            _adk_app.runner = Runner(
+                app=_adk_app.app,
+                session_service=adk_session_service
+            )
+            
+            logger.info("✅ ADK Application initialized with shared services")
+        else:
+            # Fallback: create standalone instance
+            logger.warning("app_state not available, creating standalone ADK application")
+            _adk_app = ADKApplication(
+                use_sequential_orchestrator=True,
+                use_builtin_code_executor=True
+            )
     
     return _adk_app
+
 
 
 def initialize_adk_app(
