@@ -161,19 +161,24 @@ async def run_technical_adk(
                     "language": request.language
                 }
             
-            async for event in adk_app.run_technical(
-                user_id=request.user_id,
-                session_id=request.session_id,
-                mode=request.mode,
-                **kwargs
-            ):
-                if event.content and event.content.parts:
-                    text = event.content.parts[0].text
-                    full_response += text
-                    yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
-            
-            # Final response
-            yield f"data: {json.dumps({'text': full_response, 'type': 'complete'})}\n\n"
+            try:
+                async for event in adk_app.run_technical_direct(
+                    user_id=request.user_id,
+                    session_id=request.session_id,
+                    mode=request.mode,
+                    **kwargs
+                ):
+                    if event.content and event.content.parts:
+                        text = event.content.parts[0].text
+                        if text:
+                            full_response += text
+                            yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
+                
+                # Final response
+                yield f"data: {json.dumps({'text': full_response, 'type': 'complete'})}\n\n"
+            except Exception as e:
+                logger.error(f"Streaming error: {e}")
+                yield f"data: {json.dumps({'text': str(e), 'type': 'error'})}\n\n"
         
         return StreamingResponse(
             generate(),

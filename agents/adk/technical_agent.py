@@ -171,7 +171,7 @@ Return selected questions with all their details.""",
 
 def create_code_evaluation_agent(
     model: Optional[Gemini] = None,
-    use_builtin_code_executor: bool = True,
+    use_builtin_code_executor: bool = False,  # Default to False for gemini-2.5-flash-lite compatibility
     judge0_api_key: Optional[str] = None,
     model_name: str = None
 ) -> LlmAgent:
@@ -182,7 +182,7 @@ def create_code_evaluation_agent(
     
     Args:
         model: Optional Gemini model instance
-        use_builtin_code_executor: If True, use BuiltInCodeExecutor
+        use_builtin_code_executor: If True, use BuiltInCodeExecutor (Note: may not work with gemini-2.5-flash-lite)
         judge0_api_key: Optional Judge0 API key
         model_name: Optional model name override
     
@@ -207,10 +207,9 @@ def create_code_evaluation_agent(
         if code_exec_tool:
             tools.append(code_exec_tool)
     
-    agent = LlmAgent(
-        name="CodeEvaluationAgent",
-        model=model,
-        instruction="""You are a code evaluation specialist for technical interviews.
+    # Adjust instruction based on code execution capability
+    if use_builtin_code_executor or code_exec_tool:
+        instruction = """You are a code evaluation specialist for technical interviews.
 
 Your task is to evaluate submitted code solutions:
 
@@ -228,7 +227,37 @@ Your feedback should:
 - Acknowledge what was done well
 - Suggest concrete improvements
 - Help the candidate learn and grow
-- Be encouraging and supportive""",
+- Be encouraging and supportive"""
+    else:
+        instruction = """You are a code evaluation specialist for technical interviews.
+
+Your task is to evaluate submitted code solutions through STATIC ANALYSIS:
+
+1. Use get_question_by_id() to retrieve question details and test cases
+2. Analyze the code logic WITHOUT executing it:
+   - Trace through the algorithm mentally
+   - Check if the logic handles all test cases correctly
+   - Identify potential edge cases or bugs
+   - Evaluate time and space complexity
+   - Assess code quality and style
+3. Provide comprehensive, constructive feedback
+
+Your feedback should:
+- Be specific and actionable
+- Acknowledge what was done well
+- Identify potential issues or bugs
+- Analyze the algorithm's correctness
+- Evaluate time and space complexity
+- Suggest concrete improvements
+- Help the candidate learn and grow
+- Be encouraging and supportive
+
+Note: Since you cannot execute code, perform careful static analysis to evaluate correctness."""
+    
+    agent = LlmAgent(
+        name="CodeEvaluationAgent",
+        model=model,
+        instruction=instruction,
         tools=tools,
         code_executor=code_executor,
         output_key="evaluation_result"

@@ -271,84 +271,68 @@ with tab2:
     if "interview_questions" in st.session_state and st.session_state["interview_questions"]:
         with st.expander("💡 Interview Questions", expanded=True):
             st.markdown(st.session_state["interview_questions"])
-    
-    # Display current question
-    if st.session_state.current_questions:
-        total_questions = len(st.session_state.current_questions)
-        current_idx = st.session_state.current_question_index
-        
-        # Question navigation
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col1:
-            if st.button("◀️ Previous", disabled=current_idx == 0):
-                st.session_state.current_question_index = max(0, current_idx - 1)
-                st.rerun()
-        
-        with col2:
-            st.markdown(f"<center><b>Question {current_idx + 1} of {total_questions}</b></center>", unsafe_allow_html=True)
-        
-        with col3:
-            if st.button("Next ▶️", disabled=current_idx >= total_questions - 1):
-                st.session_state.current_question_index = min(total_questions - 1, current_idx + 1)
-                st.rerun()
-        
-        st.markdown("---")
-        
-        # Display question
-        current_question = st.session_state.current_questions[current_idx]
-        question_display_component(current_question, current_idx + 1)
-        
-        st.markdown("---")
-        
-        # Code editor
-        st.markdown("### 💻 Your Solution")
-        
-        question_id = current_question.get('id', f'q{current_idx}')
-        editor_key = f"editor_{question_id}"
-        
-        # Get saved code or default
-        default_code = st.session_state.get(f"code_{question_id}", "")
-        
-        editor_result = code_editor_component(
-            default_code=default_code,
-            language="python",
-            height=400,
-            key=editor_key
-        )
-        
-        # Save code to session state
-        st.session_state[f"code_{question_id}"] = editor_result["code"]
-        
-        # Submit button
-        col1, col2 = st.columns([1, 4])
-        with col1:
-            if st.button("✅ Submit Code", use_container_width=True, type="primary"):
-                if not editor_result["code"].strip():
-                    st.error("Please write some code before submitting!")
-                elif client:
-                    with st.spinner("🔍 Evaluating your code..."):
-                        try:
-                            result = client.submit_code(
-                                st.session_state.session_id,
-                                question_id,
-                                editor_result["code"],
-                                editor_result["language"]
-                            )
-                            
-                            st.session_state.evaluation_results[question_id] = result
-                            st.success("✅ Code submitted and evaluated!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed to submit code: {e}")
-        
-        # Display evaluation results
-        if question_id in st.session_state.evaluation_results:
+            
             st.markdown("---")
-            st.markdown("### 📊 Evaluation Results")
-            evaluation_result_component(st.session_state.evaluation_results[question_id])
+            st.markdown("### 📝 Submit Your Solution")
+            
+            # Code editor for submission
+            code_input = st.text_area(
+                "Write your solution here:",
+                height=300,
+                key="code_submission",
+                help="Paste your code solution here. Make sure to specify which question you are solving."
+            )
+            
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                language = st.selectbox(
+                    "Language:",
+                    ["python", "javascript", "java", "cpp"],
+                    key="code_language"
+                )
+            
+            with col2:
+                question_id = st.text_input(
+                    "Question ID (e.g., q1):",
+                    key="question_id_input",
+                    help="Enter the ID of the question you are solving (e.g., q1, q2)"
+                )
+            
+            if st.button("✅ Submit Code", type="primary"):
+                if not code_input or not question_id:
+                    st.error("Please provide both code and question ID.")
+                elif client:
+                    # Create placeholder for streaming evaluation
+                    eval_placeholder = st.empty()
+                    full_eval = ""
+                    
+                    try:
+                        with st.spinner("🧪 Evaluating code..."):
+                            for chunk in client.submit_code_streaming(
+                                session_id=st.session_state.session_id,
+                                user_id=st.session_state.get("user_id", "demo_user"),
+                                question_id=question_id,
+                                code=code_input,
+                                language=language
+                            ):
+                                full_eval += chunk
+                                eval_placeholder.markdown(f"**Evaluation Results:**\n\n{full_eval}")
+                        
+                        st.success("✅ Evaluation complete!")
+                        st.session_state["evaluation_results"] = full_eval
+                        
+                    except Exception as e:
+                        st.error(f"Evaluation failed: {e}")
     
-    else:
+    # Display evaluation results if available
+    if "evaluation_results" in st.session_state and st.session_state["evaluation_results"]:
+        with st.expander("📊 Evaluation Results", expanded=True):
+            st.markdown(st.session_state["evaluation_results"])
+    
+    # Prompt to start if no questions generated yet
+    if "interview_questions" not in st.session_state or not st.session_state["interview_questions"]:
         st.info("👆 Start an interview using the settings above to begin!")
+
 
 # ========== TAB 3: Progress & Analytics ==========
 with tab3:

@@ -246,6 +246,113 @@ Use get_question_by_id() to get test cases, then execute the code and provide co
         async for event in self.run_workflow(user_id, session_id, message):
             yield event
 
+    async def run_technical_direct(
+        self,
+        user_id: str,
+        session_id: str,
+        mode: str,
+        **kwargs
+    ):
+        """
+        Run technical agent directly without orchestrator.
+        
+        This bypasses the workflow and executes the technical agent
+        directly, ensuring tool access.
+        """
+        from google.genai import types
+        from google.adk.apps.app import App
+        from google.adk.runners import Runner
+        
+        from agents.adk.technical_agent import (
+            create_question_selection_agent,
+            create_code_evaluation_agent
+        )
+        
+        # Create specialized agent based on mode
+        if mode == "select_questions":
+            agent = create_question_selection_agent()
+        elif mode == "evaluate_code":
+            agent = create_code_evaluation_agent()
+        else:
+            raise ValueError(f"Invalid mode: {mode}")
+        
+        # Create a dedicated app for technical agent
+        tech_app = App(
+            name="technical_interview",
+            root_agent=agent
+        )
+        
+        # Create runner
+        runner = Runner(
+            app=tech_app,
+            session_service=self.runner.session_service
+        )
+        
+        # Ensure session exists
+        try:
+            existing_session = await runner.session_service.get_session(
+                app_name="technical_interview",
+                user_id=user_id,
+                session_id=session_id
+            )
+            
+            if not existing_session:
+                await runner.session_service.create_session(
+                    app_name="technical_interview",
+                    user_id=user_id,
+                    session_id=session_id
+                )
+        except Exception as e:
+            logger.warning(f"Session creation warning: {e}")
+        
+        # Build message based on mode
+        if mode == "select_questions":
+            difficulty = kwargs.get("difficulty", "medium")
+            num_questions = kwargs.get("num_questions", 3)
+            job_description = kwargs.get("job_description", "")
+            
+            message = f"""Select {num_questions} {difficulty} difficulty coding interview questions.
+
+Job Description Context:
+{job_description[:500] if job_description else 'General software engineering position'}
+
+Use get_questions_by_difficulty('{difficulty}') to retrieve questions from the question bank.
+Then select the most appropriate {num_questions} questions and return them with full details."""
+            
+        elif mode == "evaluate_code":
+            question_id = kwargs.get("question_id")
+            code = kwargs.get("code")
+            language = kwargs.get("language", "python")
+            
+            message = f"""Evaluate this code submission:
+
+Question ID: {question_id}
+Language: {language}
+
+Code:
+```{language}
+{code}
+```
+
+Steps:
+1. Use get_question_by_id('{question_id}') to get the question details and test cases
+2. Execute the code against the test cases
+3. Provide comprehensive feedback"""
+        
+        # Create message
+        query = types.Content(
+            role="user",
+            parts=[types.Part(text=message)]
+        )
+        
+        # Run and stream results
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session_id,
+            new_message=query
+        ):
+            yield event
+
 
 # Global ADK application instance
 _adk_app: Optional[ADKApplication] = None
