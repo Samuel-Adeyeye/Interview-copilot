@@ -432,6 +432,6 @@ See [ADK Installation Troubleshooting](docs/ADK_INSTALLATION_TROUBLESHOOTING.md)
 
 ---
 
-**Last Updated**: 2025-01-20  
+**Last Updated**: 2025-11-27  
 **Version**: 2.0 (ADK Migration Complete)
 
