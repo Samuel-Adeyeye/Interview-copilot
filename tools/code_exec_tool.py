@@ -141,8 +141,8 @@ class CodeExecutionTool:
                     logger.error(f"Code execution error: {e}")
             
             # Check if output matches expected (normalize whitespace)
-            actual_output = result.get("stdout", "").strip()
-            expected_output_clean = expected_output.strip()
+            actual_output = str(result.get("stdout") or "").strip()
+            expected_output_clean = str(expected_output or "").strip()
             
             # More flexible comparison (handle list/array formatting differences)
             passed = self._compare_outputs(actual_output, expected_output_clean)

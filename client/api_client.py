@@ -499,17 +499,22 @@ class InterviewCoPilotSyncClient:
             response.raise_for_status()
             
             # Parse Server-Sent Events
+            has_yielded_chunks = False
             for line in response.iter_lines():
                 if line.startswith("data: "):
                     data_str = line[6:]
                     try:
                         data = json.loads(data_str)
                         if data.get("type") == "chunk":
-                            yield data.get("text", "")
+                            text = data.get("text", "")
+                            if text:
+                                yield text
+                                has_yielded_chunks = True
                         elif data.get("type") == "complete":
-                            # Yield final complete text before breaking
+                            # Yield final complete text ONLY if no chunks were yielded
+                            # This prevents duplication since 'complete' contains the full text
                             final_text = data.get("text", "")
-                            if final_text:
+                            if final_text and not has_yielded_chunks:
                                 yield final_text
                             break
                         elif data.get("type") == "error":
