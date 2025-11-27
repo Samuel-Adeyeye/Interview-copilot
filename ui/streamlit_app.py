@@ -4,7 +4,6 @@ Complete implementation with all features
 """
 
 import streamlit as st
-import asyncio
 import sys
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -14,7 +13,7 @@ import traceback
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from client.api_client import InterviewCoPilotClient
+from client.api_client import InterviewCoPilotSyncClient
 from ui.components import (
     code_editor_component,
     question_display_component,
@@ -70,65 +69,12 @@ if 'evaluation_results' not in st.session_state:
 def get_client():
     """Get or create API client"""
     try:
-        return InterviewCoPilotClient(base_url="http://localhost:8000", timeout=60.0)
+        return InterviewCoPilotSyncClient(base_url="http://localhost:8000", timeout=60.0)
     except Exception as e:
         st.error(f"Failed to initialize API client: {e}")
         return None
 
 client = get_client()
-
-# Helper function for async operations
-def safe_api_call(coro, error_message: str = "An error occurred"):
-    """
-    Safely execute async API calls with error handling
-    Works with Streamlit's event loop using nest_asyncio
-    """
-    import asyncio
-    import nest_asyncio
-    
-    # Apply nest_asyncio to allow nested event loops (needed for Streamlit)
-    try:
-        nest_asyncio.apply()
-    except:
-        pass
-    
-    try:
-        # Try to get existing event loop
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        # Run the coroutine
-        if loop.is_running():
-            # If loop is already running, we need to use a thread
-            import concurrent.futures
-            import threading
-            
-            def run_in_thread():
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                try:
-                    return new_loop.run_until_complete(coro)
-                finally:
-                    new_loop.close()
-            
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(run_in_thread)
-                return future.result(timeout=60)
-        else:
-            return loop.run_until_complete(coro)
-    except Exception as e:
-        st.error(f"{error_message}: {str(e)}")
-        try:
-            st.exception(e)
-        except:
-            pass
-        return None
 
 # Sidebar - Session Management
 with st.sidebar:
@@ -142,17 +88,16 @@ with st.sidebar:
     if st.button("➕ Create New Session", use_container_width=True):
         if client:
             with st.spinner("Creating session..."):
-                result = safe_api_call(
-                    client.create_session(user_id),
-                    "Failed to create session"
-                )
-                if result:
+                try:
+                    result = client.create_session(user_id)
                     st.session_state.session_id = result.get('session_id')
                     st.session_state.current_questions = []
                     st.session_state.current_question_index = 0
                     st.session_state.evaluation_results = {}
                     st.success(f"✅ Session created!")
                     st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to create session: {e}")
     
     st.markdown("---")
     
@@ -161,10 +106,7 @@ with st.sidebar:
         with st.spinner("Loading sessions..."):
             try:
                 # Get user progress which includes session info
-                progress = safe_api_call(
-                    client.get_user_progress(user_id),
-                    "Failed to load progress"
-                )
+                progress = client.get_user_progress(user_id)
                 if progress:
                     sessions = progress.get('sessions', [])
                     if sessions:
@@ -235,25 +177,35 @@ with tab1:
             if not jd_text:
                 st.error("Please enter a job description")
             elif client:
-                with st.spinner("🔍 Researching company and interview process..."):
-                    result = safe_api_call(
-                        client.run_research(
-                            st.session_state.session_id,
-                            jd_text,
-                            company_name
-                        ),
-                        "Research failed"
-                    )
+                # Create a placeholder for streaming output
+                output_placeholder = st.empty()
+                full_response = ""
+                
+                try:
+                    with st.spinner("🔍 Researching company and interview process..."):
+                        # Use streaming endpoint
+                        for chunk in client.run_research_streaming(
+                            session_id=st.session_state.session_id,
+                            company_name=company_name,
+                            job_description=jd_text,
+                            user_id=st.session_state.get("user_id", "demo_user")
+                        ):
+                            full_response += chunk
+                            # Update display in real-time
+                            output_placeholder.markdown(f"**Research Results:**\n\n{full_response}")
                     
-                    if result:
-                        st.success("✅ Research complete!")
-                        
-                        # Display research results
-                        with st.expander("📊 Research Results", expanded=True):
-                            if isinstance(result, dict):
-                                st.json(result)
-                            else:
-                                st.write(result)
+                    st.success("✅ Research complete!")
+                    
+                    # Store in session state
+                    st.session_state["research_results"] = full_response
+                    
+                except Exception as e:
+                    st.error(f"Research failed: {e}")
+    
+    # Display research results if available
+    if "research_results" in st.session_state and st.session_state["research_results"]:
+        with st.expander("📊 Research Results", expanded=True):
+            st.markdown(st.session_state["research_results"])
     
     # Display parsed JD if available
     if jd_text and use_llm_parsing:
@@ -289,101 +241,98 @@ with tab2:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("🚀 Start Interview", use_container_width=True, type="primary"):
                 if client:
-                    with st.spinner("🎯 Selecting questions..."):
-                        result = safe_api_call(
-                            client.start_mock_interview(
-                                st.session_state.session_id,
-                                difficulty,
-                                num_questions
-                            ),
-                            "Failed to start interview"
-                        )
+                    # Create placeholder for streaming output
+                    output_placeholder = st.empty()
+                    full_response = ""
+                    
+                    try:
+                        with st.spinner("🎯 Selecting questions..."):
+                            # Use streaming endpoint
+                            for chunk in client.start_mock_interview_streaming(
+                                session_id=st.session_state.session_id,
+                                user_id=st.session_state.get("user_id", "demo_user"),
+                                difficulty=difficulty,
+                                num_questions=num_questions,
+                                job_description=st.session_state.get("research_results", "")
+                            ):
+                                full_response += chunk
+                                # Update display in real-time
+                                output_placeholder.markdown(f"**Generating Questions:**\n\n{full_response}")
                         
-                        if result and result.get('questions'):
-                            st.session_state.current_questions = result.get('questions', [])
-                            st.session_state.current_question_index = 0
-                            st.session_state.evaluation_results = {}
-                            st.success(f"✅ Interview started with {len(st.session_state.current_questions)} questions!")
-                            st.rerun()
+                        # Parse questions from response (assuming they're in the text)
+                        # For now, store the full response
+                        st.session_state["interview_questions"] = full_response
+                        st.success(f"✅ Interview questions generated!")
+                        
+                    except Exception as e:
+                        st.error(f"Failed to start interview: {e}")
     
-    # Display current question
-    if st.session_state.current_questions:
-        total_questions = len(st.session_state.current_questions)
-        current_idx = st.session_state.current_question_index
-        
-        # Question navigation
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col1:
-            if st.button("◀️ Previous", disabled=current_idx == 0):
-                st.session_state.current_question_index = max(0, current_idx - 1)
-                st.rerun()
-        
-        with col2:
-            st.markdown(f"<center><b>Question {current_idx + 1} of {total_questions}</b></center>", unsafe_allow_html=True)
-        
-        with col3:
-            if st.button("Next ▶️", disabled=current_idx >= total_questions - 1):
-                st.session_state.current_question_index = min(total_questions - 1, current_idx + 1)
-                st.rerun()
-        
-        st.markdown("---")
-        
-        # Display question
-        current_question = st.session_state.current_questions[current_idx]
-        question_display_component(current_question, current_idx + 1)
-        
-        st.markdown("---")
-        
-        # Code editor
-        st.markdown("### 💻 Your Solution")
-        
-        question_id = current_question.get('id', f'q{current_idx}')
-        editor_key = f"editor_{question_id}"
-        
-        # Get saved code or default
-        default_code = st.session_state.get(f"code_{question_id}", "")
-        
-        editor_result = code_editor_component(
-            default_code=default_code,
-            language="python",
-            height=400,
-            key=editor_key
-        )
-        
-        # Save code to session state
-        st.session_state[f"code_{question_id}"] = editor_result["code"]
-        
-        # Submit button
-        col1, col2 = st.columns([1, 4])
-        with col1:
-            if st.button("✅ Submit Code", use_container_width=True, type="primary"):
-                if not editor_result["code"].strip():
-                    st.error("Please write some code before submitting!")
-                elif client:
-                    with st.spinner("🔍 Evaluating your code..."):
-                        result = safe_api_call(
-                            client.submit_code(
-                                st.session_state.session_id,
-                                question_id,
-                                editor_result["code"],
-                                editor_result["language"]
-                            ),
-                            "Failed to submit code"
-                        )
-                        
-                        if result:
-                            st.session_state.evaluation_results[question_id] = result
-                            st.success("✅ Code submitted and evaluated!")
-                            st.rerun()
-        
-        # Display evaluation results
-        if question_id in st.session_state.evaluation_results:
+    # Display interview questions if available
+    if "interview_questions" in st.session_state and st.session_state["interview_questions"]:
+        with st.expander("💡 Interview Questions", expanded=True):
+            st.markdown(st.session_state["interview_questions"])
+            
             st.markdown("---")
-            st.markdown("### 📊 Evaluation Results")
-            evaluation_result_component(st.session_state.evaluation_results[question_id])
+            st.markdown("### 📝 Submit Your Solution")
+            
+            # Code editor for submission
+            code_input = st.text_area(
+                "Write your solution here:",
+                height=300,
+                key="code_submission",
+                help="Paste your code solution here. Make sure to specify which question you are solving."
+            )
+            
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                language = st.selectbox(
+                    "Language:",
+                    ["python", "javascript", "java", "cpp"],
+                    key="code_language"
+                )
+            
+            with col2:
+                question_id = st.text_input(
+                    "Question ID (e.g., q1):",
+                    key="question_id_input",
+                    help="Enter the ID of the question you are solving (e.g., q1, q2)"
+                )
+            
+            if st.button("✅ Submit Code", type="primary"):
+                if not code_input or not question_id:
+                    st.error("Please provide both code and question ID.")
+                elif client:
+                    # Create placeholder for streaming evaluation
+                    eval_placeholder = st.empty()
+                    full_eval = ""
+                    
+                    try:
+                        with st.spinner("🧪 Evaluating code..."):
+                            for chunk in client.submit_code_streaming(
+                                session_id=st.session_state.session_id,
+                                user_id=st.session_state.get("user_id", "demo_user"),
+                                question_id=question_id,
+                                code=code_input,
+                                language=language
+                            ):
+                                full_eval += chunk
+                                eval_placeholder.markdown(f"**Evaluation Results:**\n\n{full_eval}")
+                        
+                        st.success("✅ Evaluation complete!")
+                        st.session_state["evaluation_results"] = full_eval
+                        
+                    except Exception as e:
+                        st.error(f"Evaluation failed: {e}")
     
-    else:
+    # Display evaluation results if available
+    if "evaluation_results" in st.session_state and st.session_state["evaluation_results"]:
+        with st.expander("📊 Evaluation Results", expanded=True):
+            st.markdown(st.session_state["evaluation_results"])
+    
+    # Prompt to start if no questions generated yet
+    if "interview_questions" not in st.session_state or not st.session_state["interview_questions"]:
         st.info("👆 Start an interview using the settings above to begin!")
+
 
 # ========== TAB 3: Progress & Analytics ==========
 with tab3:
@@ -391,35 +340,35 @@ with tab3:
     
     if user_id and client:
         with st.spinner("Loading your progress..."):
-            progress = safe_api_call(
-                client.get_user_progress(user_id),
-                "Failed to load progress"
-            )
-            
-            if progress:
-                progress_chart_component(progress)
+            try:
+                progress = client.get_user_progress(user_id)
                 
-                # Session history
-                st.markdown("---")
-                st.subheader("Session History")
-                
-                sessions = progress.get('sessions', [])
-                if sessions:
-                    import pandas as pd
-                    session_df = pd.DataFrame([
-                        {
-                            'Session ID': s.get('session_id', '')[:8],
-                            'State': s.get('state', ''),
-                            'Created': s.get('created_at', '')[:10] if s.get('created_at') else '',
-                            'Score': s.get('average_score', 0) * 100 if s.get('average_score') else 0
-                        }
-                        for s in sessions[:10]
-                    ])
-                    st.dataframe(session_df, use_container_width=True, hide_index=True)
+                if progress:
+                    progress_chart_component(progress)
+                    
+                    # Session history
+                    st.markdown("---")
+                    st.subheader("Session History")
+                    
+                    sessions = progress.get('sessions', [])
+                    if sessions:
+                        import pandas as pd
+                        session_df = pd.DataFrame([
+                            {
+                                'Session ID': s.get('session_id', '')[:8],
+                                'State': s.get('state', ''),
+                                'Created': s.get('created_at', '')[:10] if s.get('created_at') else '',
+                                'Score': s.get('average_score', 0) * 100 if s.get('average_score') else 0
+                            }
+                            for s in sessions[:10]
+                        ])
+                        st.dataframe(session_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No session history available yet.")
                 else:
-                    st.info("No session history available yet.")
-            else:
-                st.error("Failed to load progress data.")
+                    st.error("Failed to load progress data.")
+            except Exception as e:
+                st.error(f"Failed to load progress: {e}")
     else:
         st.warning("Please enter a User ID to view progress.")
 
@@ -433,37 +382,37 @@ with tab4:
             st.rerun()
         
         with st.spinner("Loading session details..."):
-            summary = safe_api_call(
-                client.get_session_summary(st.session_state.session_id),
-                "Failed to load session summary"
-            )
-            
-            if summary:
-                col1, col2 = st.columns(2)
+            try:
+                summary = client.get_session_summary(st.session_state.session_id)
                 
-                with col1:
-                    st.metric("Session ID", st.session_state.session_id[:16] + "...")
-                    st.metric("State", summary.get('state', 'unknown'))
-                    st.metric("Total Questions", summary.get('total_questions', 0))
-                
-                with col2:
-                    st.metric("Average Score", f"{summary.get('average_score', 0) * 100:.1f}%")
-                    st.metric("Questions Completed", summary.get('questions_completed', 0))
-                    st.metric("Created", summary.get('created_at', '')[:10] if summary.get('created_at') else 'N/A')
-                
-                # Session artifacts
-                artifacts = summary.get('artifacts', [])
-                if artifacts:
-                    st.markdown("### Session Artifacts")
-                    for artifact in artifacts:
-                        with st.expander(f"📎 {artifact.get('type', 'Unknown')}"):
-                            st.json(artifact.get('payload', {}))
-                
-                # Full session data
-                with st.expander("📋 Full Session Data"):
-                    st.json(summary)
-            else:
-                st.error("Failed to load session summary.")
+                if summary:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.metric("Session ID", st.session_state.session_id[:16] + "...")
+                        st.metric("State", summary.get('state', 'unknown'))
+                        st.metric("Total Questions", summary.get('total_questions', 0))
+                    
+                    with col2:
+                        st.metric("Average Score", f"{summary.get('average_score', 0) * 100:.1f}%")
+                        st.metric("Questions Completed", summary.get('questions_completed', 0))
+                        st.metric("Created", summary.get('created_at', '')[:10] if summary.get('created_at') else 'N/A')
+                    
+                    # Session artifacts
+                    artifacts = summary.get('artifacts', [])
+                    if artifacts:
+                        st.markdown("### Session Artifacts")
+                        for artifact in artifacts:
+                            with st.expander(f"📎 {artifact.get('type', 'Unknown')}"):
+                                st.json(artifact.get('payload', {}))
+                    
+                    # Full session data
+                    with st.expander("📋 Full Session Data"):
+                        st.json(summary)
+                else:
+                    st.error("Failed to load session summary.")
+            except Exception as e:
+                st.error(f"Failed to load session summary: {e}")
     else:
         st.info("No active session. Create a session to see details here.")
 

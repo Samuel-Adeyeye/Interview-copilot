@@ -10,11 +10,26 @@ class InterviewCoPilotClient:
     def __init__(self, base_url: str = "http://localhost:8000", timeout: float = 30.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.session = httpx.AsyncClient(timeout=timeout)
+        self._session = None  # Lazy initialization
+    
+    def _get_session(self):
+        """Get or create async client session (lazy initialization per event loop)"""
+        # Always create a new client to avoid event loop binding issues
+        # This ensures the client is bound to the current event loop
+        return httpx.AsyncClient(timeout=self.timeout)
+    
+    @property
+    def session(self):
+        """Get async client session (creates new one each time to avoid event loop issues)"""
+        # Create a new session each time to avoid event loop binding issues
+        # This is necessary when using nest_asyncio with Streamlit
+        return self._get_session()
     
     async def close(self):
         """Close the client session"""
-        await self.session.aclose()
+        if self._session is not None:
+            await self._session.aclose()
+            self._session = None
     
     async def __aenter__(self):
         return self
@@ -26,39 +41,44 @@ class InterviewCoPilotClient:
     
     async def create_session(self, user_id: str, metadata: Dict = None) -> Dict[str, Any]:
         """Create a new interview session"""
-        response = await self.session.post(
-            f"{self.base_url}/sessions/create",
-            json={
-                "user_id": user_id,
-                "metadata": metadata or {}
-            }
-        )
-        response.raise_for_status()
-        return response.json()
+        # Create a new client for this request to avoid event loop issues
+        async with self._get_session() as session:
+            response = await session.post(
+                f"{self.base_url}/sessions/create",
+                json={
+                    "user_id": user_id,
+                    "metadata": metadata or {}
+                }
+            )
+            response.raise_for_status()
+            return response.json()
     
     async def get_session(self, session_id: str) -> Dict[str, Any]:
         """Get session details"""
-        response = await self.session.get(
-            f"{self.base_url}/sessions/{session_id}"
-        )
-        response.raise_for_status()
-        return response.json()
+        async with self._get_session() as session:
+            response = await session.get(
+                f"{self.base_url}/sessions/{session_id}"
+            )
+            response.raise_for_status()
+            return response.json()
     
     async def pause_session(self, session_id: str) -> Dict[str, Any]:
         """Pause a running session"""
-        response = await self.session.post(
-            f"{self.base_url}/sessions/{session_id}/pause"
-        )
-        response.raise_for_status()
-        return response.json()
+        async with self._get_session() as session:
+            response = await session.post(
+                f"{self.base_url}/sessions/{session_id}/pause"
+            )
+            response.raise_for_status()
+            return response.json()
     
     async def resume_session(self, session_id: str) -> Dict[str, Any]:
         """Resume a paused session"""
-        response = await self.session.post(
-            f"{self.base_url}/sessions/{session_id}/resume"
-        )
-        response.raise_for_status()
-        return response.json()
+        async with self._get_session() as session:
+            response = await session.post(
+                f"{self.base_url}/sessions/{session_id}/resume"
+            )
+            response.raise_for_status()
+            return response.json()
     
     # ===== Job Description & Research =====
     
@@ -69,7 +89,198 @@ class InterviewCoPilotClient:
         jd_text: str
     ) -> Dict[str, Any]:
         """Upload a job description"""
-        response = await self.session.post(
+        async with self._get_session() as session:
+            response = await session.post(
+                f"{self.base_url}/job-descriptions/upload",
+                json={
+                    "job_title": job_title,
+                    "company_name": company_name,
+                    "jd_text": jd_text
+                }
+            )
+            response.raise_for_status()
+            return response.json()
+    
+    async def run_research(
+        self, 
+        session_id: str, 
+        job_description: str, 
+        company_name: str
+    ) -> Dict[str, Any]:
+        """Run research agent"""
+        # Create a new client for this request to avoid event loop issues
+        async with self._get_session() as session:
+            response = await session.post(
+                f"{self.base_url}/research/run",
+                json={
+                    "session_id": session_id,
+                    "job_description": job_description,
+                    "company_name": company_name
+                }
+            )
+            response.raise_for_status()
+            return response.json()
+    
+    # ===== Mock Interview =====
+    
+    async def start_mock_interview(
+        self, 
+        session_id: str, 
+        difficulty: str = "medium", 
+        num_questions: int = 3
+    ) -> Dict[str, Any]:
+        """Start mock technical interview"""
+        async with self._get_session() as session:
+            response = await session.post(
+                f"{self.base_url}/interview/start",
+                json={
+                    "session_id": session_id,
+                    "difficulty": difficulty,
+                    "num_questions": num_questions
+                }
+            )
+            response.raise_for_status()
+            return response.json()
+    
+    async def submit_code(
+        self, 
+        session_id: str, 
+        question_id: str, 
+        code: str, 
+        language: str = "python"
+    ) -> Dict[str, Any]:
+        """Submit code for evaluation"""
+        async with self._get_session() as session:
+            response = await session.post(
+                f"{self.base_url}/interview/submit-code",
+                json={
+                    "session_id": session_id,
+                    "question_id": question_id,
+                    "code": code,
+                    "language": language
+                }
+            )
+            response.raise_for_status()
+            return response.json()
+    
+    # ===== Progress & Memory =====
+    
+    async def get_user_progress(self, user_id: str) -> Dict[str, Any]:
+        """Get user's progress and history"""
+        async with self._get_session() as session:
+            response = await session.get(
+                f"{self.base_url}/users/{user_id}/progress"
+            )
+            response.raise_for_status()
+            return response.json()
+    
+    async def get_session_summary(self, session_id: str) -> Dict[str, Any]:
+        """Get comprehensive session summary"""
+        async with self._get_session() as session:
+            response = await session.get(
+                f"{self.base_url}/sessions/{session_id}/summary"
+            )
+            response.raise_for_status()
+            return response.json()
+    
+    # ===== Observability =====
+    
+    async def get_metrics(self) -> Dict[str, Any]:
+        """Get system metrics"""
+        async with self._get_session() as session:
+            response = await session.get(
+                f"{self.base_url}/metrics"
+            )
+            response.raise_for_status()
+            return response.json()
+    
+    async def get_session_traces(self, session_id: str) -> Dict[str, Any]:
+        """Get session traces for observability"""
+        async with self._get_session() as session:
+            response = await session.get(
+                f"{self.base_url}/sessions/{session_id}/traces"
+            )
+            response.raise_for_status()
+            return response.json()
+
+
+class InterviewCoPilotSyncClient:
+    """
+    Synchronous Python client for Interview Co-Pilot API
+    Designed for use with Streamlit and other synchronous environments
+    """
+    
+    def __init__(self, base_url: str = "http://localhost:8000", timeout: float = 30.0):
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        self._session = None
+    
+    def _get_session(self):
+        """Get or create sync client session"""
+        if self._session is None:
+            self._session = httpx.Client(timeout=self.timeout)
+        return self._session
+    
+    def close(self):
+        """Close the client session"""
+        if self._session is not None:
+            self._session.close()
+            self._session = None
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+    
+    # ===== Session Management =====
+    
+    def create_session(self, user_id: str, metadata: Dict = None) -> Dict[str, Any]:
+        """Create a new interview session"""
+        response = self._get_session().post(
+            f"{self.base_url}/sessions/create",
+            json={
+                "user_id": user_id,
+                "metadata": metadata or {}
+            }
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    def get_session(self, session_id: str) -> Dict[str, Any]:
+        """Get session details"""
+        response = self._get_session().get(
+            f"{self.base_url}/sessions/{session_id}"
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    def pause_session(self, session_id: str) -> Dict[str, Any]:
+        """Pause a running session"""
+        response = self._get_session().post(
+            f"{self.base_url}/sessions/{session_id}/pause"
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    def resume_session(self, session_id: str) -> Dict[str, Any]:
+        """Resume a paused session"""
+        response = self._get_session().post(
+            f"{self.base_url}/sessions/{session_id}/resume"
+        )
+        response.raise_for_status()
+        return response.json()
+    
+    # ===== Job Description & Research =====
+    
+    def upload_job_description(
+        self, 
+        job_title: str, 
+        company_name: str, 
+        jd_text: str
+    ) -> Dict[str, Any]:
+        """Upload a job description"""
+        response = self._get_session().post(
             f"{self.base_url}/job-descriptions/upload",
             json={
                 "job_title": job_title,
@@ -80,14 +291,14 @@ class InterviewCoPilotClient:
         response.raise_for_status()
         return response.json()
     
-    async def run_research(
+    def run_research(
         self, 
         session_id: str, 
         job_description: str, 
         company_name: str
     ) -> Dict[str, Any]:
         """Run research agent"""
-        response = await self.session.post(
+        response = self._get_session().post(
             f"{self.base_url}/research/run",
             json={
                 "session_id": session_id,
@@ -100,14 +311,14 @@ class InterviewCoPilotClient:
     
     # ===== Mock Interview =====
     
-    async def start_mock_interview(
+    def start_mock_interview(
         self, 
         session_id: str, 
         difficulty: str = "medium", 
         num_questions: int = 3
     ) -> Dict[str, Any]:
         """Start mock technical interview"""
-        response = await self.session.post(
+        response = self._get_session().post(
             f"{self.base_url}/interview/start",
             json={
                 "session_id": session_id,
@@ -118,7 +329,7 @@ class InterviewCoPilotClient:
         response.raise_for_status()
         return response.json()
     
-    async def submit_code(
+    def submit_code(
         self, 
         session_id: str, 
         question_id: str, 
@@ -126,7 +337,7 @@ class InterviewCoPilotClient:
         language: str = "python"
     ) -> Dict[str, Any]:
         """Submit code for evaluation"""
-        response = await self.session.post(
+        response = self._get_session().post(
             f"{self.base_url}/interview/submit-code",
             json={
                 "session_id": session_id,
@@ -140,17 +351,17 @@ class InterviewCoPilotClient:
     
     # ===== Progress & Memory =====
     
-    async def get_user_progress(self, user_id: str) -> Dict[str, Any]:
+    def get_user_progress(self, user_id: str) -> Dict[str, Any]:
         """Get user's progress and history"""
-        response = await self.session.get(
+        response = self._get_session().get(
             f"{self.base_url}/users/{user_id}/progress"
         )
         response.raise_for_status()
         return response.json()
     
-    async def get_session_summary(self, session_id: str) -> Dict[str, Any]:
+    def get_session_summary(self, session_id: str) -> Dict[str, Any]:
         """Get comprehensive session summary"""
-        response = await self.session.get(
+        response = self._get_session().get(
             f"{self.base_url}/sessions/{session_id}/summary"
         )
         response.raise_for_status()
@@ -158,18 +369,153 @@ class InterviewCoPilotClient:
     
     # ===== Observability =====
     
-    async def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> Dict[str, Any]:
         """Get system metrics"""
-        response = await self.session.get(
+        response = self._get_session().get(
             f"{self.base_url}/metrics"
         )
         response.raise_for_status()
         return response.json()
     
-    async def get_session_traces(self, session_id: str) -> Dict[str, Any]:
+    def get_session_traces(self, session_id: str) -> Dict[str, Any]:
         """Get session traces for observability"""
-        response = await self.session.get(
+        response = self._get_session().get(
             f"{self.base_url}/sessions/{session_id}/traces"
         )
         response.raise_for_status()
         return response.json()
+    
+    # ===== ADK v2 Streaming Endpoints =====
+    
+    def run_research_streaming(
+        self,
+        session_id: str,
+        company_name: str,
+        job_description: str,
+        user_id: str = None
+    ):
+        """
+        Run research agent using ADK v2 streaming endpoint.
+        Yields text chunks as they arrive.
+        """
+        import json
+        
+        with self._get_session().stream(
+            "POST",
+            f"{self.base_url}/api/v2/adk/research",
+            json={
+                "session_id": session_id,
+                "company_name": company_name,
+                "job_description": job_description,
+                "user_id": user_id
+            },
+            timeout=120.0  # Longer timeout for streaming
+        ) as response:
+            response.raise_for_status()
+            
+            # Parse Server-Sent Events
+            for line in response.iter_lines():
+                if line.startswith("data: "):
+                    data_str = line[6:]  # Remove "data: " prefix
+                    try:
+                        data = json.loads(data_str)
+                        if data.get("type") == "chunk":
+                            yield data.get("text", "")
+                        elif data.get("type") == "complete":
+                            # Final complete response
+                            break
+                    except json.JSONDecodeError:
+                        continue
+    
+    def start_mock_interview_streaming(
+        self,
+        session_id: str,
+        user_id: str,
+        difficulty: str = "medium",
+        num_questions: int = 3,
+        job_description: str = None
+    ):
+        """
+        Start mock interview using ADK v2 streaming endpoint.
+        Yields text chunks as they arrive.
+        """
+        import json
+        
+        with self._get_session().stream(
+            "POST",
+            f"{self.base_url}/api/v2/adk/technical",
+            json={
+                "session_id": session_id,
+                "user_id": user_id,
+                "mode": "select_questions",
+                "difficulty": difficulty,
+                "num_questions": num_questions,
+                "job_description": job_description
+            },
+            timeout=120.0
+        ) as response:
+            response.raise_for_status()
+            
+            # Parse Server-Sent Events
+            for line in response.iter_lines():
+                if line.startswith("data: "):
+                    data_str = line[6:]
+                    try:
+                        data = json.loads(data_str)
+                        if data.get("type") == "chunk":
+                            yield data.get("text", "")
+                        elif data.get("type") == "complete":
+                            break
+                    except json.JSONDecodeError:
+                        continue
+    
+    def submit_code_streaming(
+        self,
+        session_id: str,
+        user_id: str,
+        question_id: str,
+        code: str,
+        language: str = "python"
+    ):
+        """
+        Submit code for evaluation using ADK v2 streaming endpoint.
+        Yields text chunks as they arrive.
+        """
+        import json
+        
+        with self._get_session().stream(
+            "POST",
+            f"{self.base_url}/api/v2/adk/technical",
+            json={
+                "session_id": session_id,
+                "user_id": user_id,
+                "mode": "evaluate_code",
+                "question_id": question_id,
+                "code": code,
+                "language": language
+            },
+            timeout=120.0
+        ) as response:
+            response.raise_for_status()
+            
+            # Parse Server-Sent Events
+            for line in response.iter_lines():
+                if line.startswith("data: "):
+                    data_str = line[6:]
+                    try:
+                        data = json.loads(data_str)
+                        if data.get("type") == "chunk":
+                            yield data.get("text", "")
+                        elif data.get("type") == "complete":
+                            # Yield final complete text before breaking
+                            final_text = data.get("text", "")
+                            if final_text:
+                                yield final_text
+                            break
+                        elif data.get("type") == "error":
+                            # Yield error message
+                            error_text = data.get("text", "Unknown error")
+                            yield f"\n\n**Error**: {error_text}"
+                            break
+                    except json.JSONDecodeError:
+                        continue
