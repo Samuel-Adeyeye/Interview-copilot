@@ -61,7 +61,7 @@ def create_judge0_code_exec_tool(judge0_api_key: Optional[str] = None):
     def execute_code(
         code: str,
         language: str = "python",
-        test_cases: List[Dict[str, Any]] = None
+        test_cases: list = None
     ) -> Dict[str, Any]:
         """
         Execute code with test cases using Judge0.
@@ -85,16 +85,31 @@ def create_judge0_code_exec_tool(judge0_api_key: Optional[str] = None):
                 "error_message": str (if error)
             }
         """
-        import asyncio
-        
         if test_cases is None:
             test_cases = []
         
         try:
-            # Run async execution
-            result = asyncio.run(
-                code_exec_tool.execute_code(code, language, test_cases)
-            )
+            # Since we're in an async context, we need to handle this properly
+            # We'll use asyncio to run in a thread pool to avoid event loop conflicts
+            import concurrent.futures
+            import threading
+            
+            def run_in_new_loop():
+                # Create a new event loop in a separate thread
+                import asyncio
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    return new_loop.run_until_complete(
+                        code_exec_tool.execute_code(code, language, test_cases)
+                    )
+                finally:
+                    new_loop.close()
+            
+            # Run in thread pool to avoid event loop conflicts
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(run_in_new_loop)
+                result = future.result(timeout=30)  # 30 second timeout
             
             return {
                 "status": "success",
@@ -104,6 +119,14 @@ def create_judge0_code_exec_tool(judge0_api_key: Optional[str] = None):
                 "executionTimeMs": result.get("executionTimeMs", 0),
                 "stdout": result.get("stdout", ""),
                 "stderr": result.get("stderr", "")
+            }
+        except concurrent.futures.TimeoutError:
+            logger.error("Code execution timed out")
+            return {
+                "status": "error",
+                "error_message": "Code execution timed out (30s limit)",
+                "testsPassed": 0,
+                "totalTests": len(test_cases) if test_cases else 0
             }
         except Exception as e:
             logger.error(f"Code execution error: {e}")

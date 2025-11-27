@@ -162,22 +162,35 @@ async def run_technical_adk(
                 }
             
             try:
+                event_count = 0
                 async for event in adk_app.run_technical_direct(
                     user_id=request.user_id,
                     session_id=request.session_id,
                     mode=request.mode,
                     **kwargs
                 ):
+                    event_count += 1
+                    parts_count = len(event.content.parts) if (event.content and event.content.parts) else 0
+                    logger.info(f"Event {event_count}: content={bool(event.content)}, parts={parts_count}")
+                    
                     if event.content and event.content.parts:
-                        text = event.content.parts[0].text
-                        if text:
-                            full_response += text
-                            yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
+                        for i, part in enumerate(event.content.parts):
+                            if hasattr(part, 'text') and part.text:
+                                text = part.text
+                                logger.info(f"Event {event_count}, part {i}: text length={len(text)}")
+                                full_response += text
+                                yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
+                            elif hasattr(part, 'function_call'):
+                                logger.info(f"Event {event_count}, part {i}: function_call={part.function_call.name if hasattr(part.function_call, 'name') else 'unknown'}")
+                            elif hasattr(part, 'function_response'):
+                                logger.info(f"Event {event_count}, part {i}: function_response")
+                
+                logger.info(f"Streaming completed. Total events: {event_count}, response length: {len(full_response)}")
                 
                 # Final response
                 yield f"data: {json.dumps({'text': full_response, 'type': 'complete'})}\n\n"
             except Exception as e:
-                logger.error(f"Streaming error: {e}")
+                logger.error(f"Streaming error: {e}", exc_info=True)
                 yield f"data: {json.dumps({'text': str(e), 'type': 'error'})}\n\n"
         
         return StreamingResponse(

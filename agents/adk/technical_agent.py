@@ -179,16 +179,19 @@ def create_code_evaluation_agent(
     Create a specialized agent for code evaluation only.
     
     This is a focused version for evaluating code submissions.
+    Auto-detects Judge0 API key and uses it for actual code execution when available.
     
     Args:
         model: Optional Gemini model instance
         use_builtin_code_executor: If True, use BuiltInCodeExecutor (Note: may not work with gemini-2.5-flash-lite)
-        judge0_api_key: Optional Judge0 API key
+        judge0_api_key: Optional Judge0 API key (auto-detected from env if not provided)
         model_name: Optional model name override
     
     Returns:
         LlmAgent for code evaluation
     """
+    from config.settings import settings
+    
     if model is None:
         model = get_gemini_model(model_name)
     
@@ -199,35 +202,62 @@ def create_code_evaluation_agent(
     # Get code execution
     code_executor = None
     code_exec_tool = None
+    has_execution = False
+    
+    # Auto-detect Judge0 API key from environment if not provided
+    if judge0_api_key is None:
+        judge0_api_key = settings.JUDGE0_API_KEY
     
     if use_builtin_code_executor:
         code_executor = create_builtin_code_executor()
-    else:
+        has_execution = True
+    elif judge0_api_key:
+        # Use Judge0 if API key is available
         code_exec_tool = create_judge0_code_exec_tool(judge0_api_key)
         if code_exec_tool:
             tools.append(code_exec_tool)
+            has_execution = True
+            logger.info("✅ Code evaluation agent will use Judge0 for actual code execution")
     
     # Adjust instruction based on code execution capability
-    if use_builtin_code_executor or code_exec_tool:
+    if has_execution:
         instruction = """You are a code evaluation specialist for technical interviews.
 
-Your task is to evaluate submitted code solutions:
+Your task is to evaluate submitted code solutions by COMBINING execution results with static analysis:
 
-1. Use get_question_by_id() to retrieve question details and test cases
-2. Execute the code using code execution tools
-3. Analyze the results:
-   - Check if all test cases pass
+1. **Get Question Details**: Use get_question_by_id() to retrieve question details and test cases
+
+2. **Execute Code**: Use the execute_code() tool to run the code with test cases
+   - This provides real execution results, pass/fail status, and runtime metrics
+
+3. **Perform Static Analysis**: Even with execution results, also analyze the code:
+   - Review the algorithm and approach
    - Evaluate time and space complexity
-   - Assess code quality and style
-   - Identify strengths and areas for improvement
-4. Provide comprehensive, constructive feedback
+   - Assess code quality, style, and readability
+   - Identify edge cases or potential improvements
+   - Look for best practices or anti-patterns
+
+4. **Provide Comprehensive Feedback** combining both execution and analysis:
+   - Start with test results (how many passed/failed)
+   - Explain WHY tests passed or failed based on the algorithm
+   - Discuss time/space complexity
+   - Highlight code quality aspects
+   - Suggest concrete improvements
+   - Acknowledge what was done well
 
 Your feedback should:
 - Be specific and actionable
-- Acknowledge what was done well
-- Suggest concrete improvements
-- Help the candidate learn and grow
-- Be encouraging and supportive"""
+- Combine empirical results (execution) with analytical insights (static analysis)
+- Help candidates understand both WHAT happened (test results) and WHY (algorithm analysis)
+- Be encouraging and supportive
+- Guide learning and improvement
+
+Example structure:
+1. Test Results: X/Y tests passed
+2. Algorithm Analysis: [explain the approach and logic]
+3. Complexity: Time O(n), Space O(1)
+4. Code Quality: [readability, style, best practices]
+5. Suggestions: [specific improvements]"""
     else:
         instruction = """You are a code evaluation specialist for technical interviews.
 
@@ -262,6 +292,8 @@ Note: Since you cannot execute code, perform careful static analysis to evaluate
         code_executor=code_executor,
         output_key="evaluation_result"
     )
+    
+    logger.info(f"✅ Code evaluation agent created with {len(tools)} tools, has_execution={has_execution}")
     
     return agent
 

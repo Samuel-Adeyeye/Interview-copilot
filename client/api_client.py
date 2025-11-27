@@ -507,6 +507,15 @@ class InterviewCoPilotSyncClient:
                         if data.get("type") == "chunk":
                             yield data.get("text", "")
                         elif data.get("type") == "complete":
+                            # Yield final complete text before breaking
+                            final_text = data.get("text", "")
+                            if final_text:
+                                yield final_text
+                            break
+                        elif data.get("type") == "error":
+                            # Yield error message
+                            error_text = data.get("text", "Unknown error")
+                            yield f"\n\n**Error**: {error_text}"
                             break
                     except json.JSONDecodeError:
                         continue
