@@ -195,6 +195,13 @@ class CodeExecutionTool:
         expected_norm = re.sub(r'\s+', ' ', expected.strip())
         if actual_norm == expected_norm:
             return True
+            
+        # Check if expected output is one of the lines in actual output
+        # This handles cases where user includes manual print statements for multiple tests
+        if '\n' in actual:
+            actual_lines = [re.sub(r'\s+', ' ', line.strip()) for line in actual.split('\n') if line.strip()]
+            if expected_norm in actual_lines:
+                return True
         
         return False
     
