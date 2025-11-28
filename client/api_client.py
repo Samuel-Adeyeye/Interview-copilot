@@ -433,7 +433,8 @@ class InterviewCoPilotSyncClient:
         user_id: str,
         difficulty: str = "medium",
         num_questions: int = 3,
-        job_description: str = None
+        job_description: str = None,
+        company_name: str = None
     ):
         """
         Start mock interview using ADK v2 streaming endpoint.
@@ -450,7 +451,8 @@ class InterviewCoPilotSyncClient:
                 "mode": "select_questions",
                 "difficulty": difficulty,
                 "num_questions": num_questions,
-                "job_description": job_description
+                "job_description": job_description,
+                "company_name": company_name
             },
             timeout=120.0
         ) as response:

@@ -15,6 +15,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+from tools.adk.mcp_tools import create_brave_search_mcp_tool
+
 def create_technical_agent(
     model: Optional[Gemini] = None,
     code_exec_tool = None,
@@ -27,8 +29,9 @@ def create_technical_agent(
     Create ADK Technical Agent for coding interviews.
     
     This agent can:
-    1. Select coding questions based on difficulty
-    2. Evaluate submitted code solutions
+    1. Select coding questions based on difficulty (Static)
+    2. Generate company-specific questions using Brave Search MCP (Dynamic)
+    3. Evaluate submitted code solutions
     
     Args:
         model: Optional Gemini model instance
@@ -40,16 +43,6 @@ def create_technical_agent(
     
     Returns:
         LlmAgent configured for technical interview tasks
-    
-    Example:
-        >>> # Use built-in code executor (Python only)
-        >>> agent = create_technical_agent(use_builtin_code_executor=True)
-        
-        >>> # Use Judge0 for multi-language support
-        >>> agent = create_technical_agent(
-        ...     use_builtin_code_executor=False,
-        ...     judge0_api_key="your_key"
-        ... )
     """
     # Get model if not provided
     if model is None:
@@ -70,23 +63,41 @@ def create_technical_agent(
             code_exec_tool = create_judge0_code_exec_tool(judge0_api_key)
             code_executor = None
     
+    # Try to create MCP tool for dynamic questions
+    mcp_toolset = create_brave_search_mcp_tool()
+    
     # Collect all tools
     tools = list(question_bank_tools)
     if code_exec_tool:
         tools.append(code_exec_tool)
+    if mcp_toolset:
+        tools.append(mcp_toolset)
+        logger.info("✅ Technical Agent enabled with Brave Search MCP for dynamic questions")
     
     # Create agent instruction
     instruction = """You are a technical interview assistant specializing in coding interviews.
 
-You have two main capabilities:
+You have three main capabilities:
 
 1. **Question Selection Mode** (mode="select_questions"):
-   - Use get_questions_by_difficulty() to retrieve questions
+   - Use get_questions_by_difficulty() to retrieve questions from the static bank
    - Filter questions based on job description requirements if needed
    - Select appropriate number of questions
    - Return questions with full details (description, examples, test cases, hints)
 
-2. **Code Evaluation Mode** (mode="evaluate_code"):
+2. **Dynamic Question Generation** (when user asks for specific company questions):
+   - Use 'brave_web_search' to find recent interview questions for the requested company (e.g., "latest Google software engineer interview questions leetcode")
+   - Parse the search results to identify real interview questions
+   - Format the found questions into the standard structure:
+     * Title
+     * Difficulty (estimate if not found)
+     * Description
+     * Examples (Input/Output)
+     * Test Cases (Create 2-3 simple test cases based on examples)
+     * Hints
+   - Return these dynamically generated questions just like static ones
+
+3. **Code Evaluation Mode** (mode="evaluate_code"):
    - Use get_question_by_id() to get question details and test cases
    - Use code execution tools to run the submitted code
    - Analyze test results
@@ -133,6 +144,7 @@ def create_question_selection_agent(
     Create a specialized agent for question selection only.
     
     This is a lighter version focused only on selecting questions.
+    Supports both static question bank and dynamic company-specific questions via Brave Search.
     
     Args:
         model: Optional Gemini model instance
@@ -144,7 +156,15 @@ def create_question_selection_agent(
     if model is None:
         model = get_gemini_model(model_name)
     
+    # Get static question bank tools
     question_tools = create_question_bank_tools()
+    
+    # Try to add Brave Search MCP for dynamic questions
+    mcp_toolset = create_brave_search_mcp_tool()
+    tools = list(question_tools)
+    if mcp_toolset:
+        tools.append(mcp_toolset)
+        logger.info("✅ Question Selection Agent enabled with Brave Search MCP")
     
     agent = LlmAgent(
         name="QuestionSelectionAgent",
@@ -155,14 +175,29 @@ Your task is to select appropriate coding questions based on:
 - Difficulty level (easy, medium, hard)
 - Job description requirements
 - Number of questions requested
+- Company name (if provided)
 
-Use the available question bank tools to:
-1. Get questions by difficulty
-2. Filter by tags if needed
-3. Search for specific topics if needed
+You have two modes:
+
+1. **Static Question Selection** (when no company specified):
+   - Use get_questions_by_difficulty() to retrieve questions from the question bank
+   - Filter by tags if needed
+   - Search for specific topics if needed
+
+2. **Dynamic Question Generation** (when company is specified in the query):
+   - Use 'brave_web_search' to find recent interview questions for the specified company
+   - Parse search results to identify real interview questions
+   - Format questions into the standard structure:
+     * Title
+     * Difficulty (estimate if not found)
+     * Description
+     * Examples (Input/Output)
+     * Test Cases (2-3 simple test cases)
+     * Hints
+   - Return well-formatted questions
 
 Return selected questions with all their details.""",
-        tools=question_tools,
+        tools=tools,
         output_key="selected_questions"
     )
     

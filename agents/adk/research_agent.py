@@ -46,10 +46,7 @@ class ResearchPacket(BaseModel):
     )
 
 
-from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
-from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
-from mcp import StdioServerParameters
-import os
+from tools.adk.mcp_tools import create_brave_search_mcp_tool
 
 def create_research_agent(
     model: Optional[Gemini] = None,
@@ -74,46 +71,16 @@ def create_research_agent(
     if model is None:
         model = get_gemini_model(model_name)
     
-    # Check if npx is available
-    import shutil
-    npx_path = shutil.which("npx")
+    # Try to create MCP tool
+    mcp_toolset = create_brave_search_mcp_tool()
     
-    # If not in PATH, check common locations
-    if not npx_path and os.path.exists("/usr/local/bin/npx"):
-        npx_path = "/usr/local/bin/npx"
-    
-    # Create Brave Search MCP Toolset if npx is available and API key is present
-    brave_api_key = os.getenv("BRAVE_API_KEY")
-    use_mcp = False
-    
-    if npx_path and brave_api_key:
-        try:
-            mcp_toolset = McpToolset(
-                connection_params=StdioConnectionParams(
-                    server_params=StdioServerParameters(
-                        command=npx_path,  # Use the resolved path
-                        args=["-y", "@modelcontextprotocol/server-brave-search"],
-                        env={
-                            **os.environ, 
-                            "BRAVE_API_KEY": brave_api_key,
-                            "PATH": f"/usr/local/bin:{os.environ.get('PATH', '')}"
-                        }
-                    ),
-                    timeout=30
-                )
-            )
-            tools = [mcp_toolset]
-            use_mcp = True
-            logger.info("✅ Using Brave Search MCP Tool")
-        except Exception as e:
-            logger.error(f"Failed to initialize MCP tool: {e}")
-            tools = [create_adk_search_tool()]
+    if mcp_toolset:
+        tools = [mcp_toolset]
+        use_mcp = True
     else:
-        if not npx_path:
-            logger.warning("⚠️ 'npx' not found. Falling back to standard Google Search.")
-        if not brave_api_key:
-            logger.warning("⚠️ BRAVE_API_KEY not found. Falling back to standard Google Search.")
+        # Fallback to standard search tool
         tools = [create_adk_search_tool()]
+        use_mcp = False
 
     # Set instructions based on available tool
     if use_mcp:

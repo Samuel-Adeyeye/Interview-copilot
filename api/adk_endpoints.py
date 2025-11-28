@@ -44,6 +44,7 @@ class ADKTechnicalRequest(BaseModel):
     code: Optional[str] = None
     language: Optional[str] = Field("python", pattern="^(python|javascript|java|cpp)$")
     job_description: Optional[str] = None
+    company_name: Optional[str] = None
 
 
 class ADKWorkflowRequest(BaseModel):
@@ -149,11 +150,23 @@ async def run_technical_adk(
             kwargs = {}
             
             if request.mode == "select_questions":
-                kwargs = {
-                    "difficulty": request.difficulty,
-                    "num_questions": request.num_questions,
-                    "job_description": request.job_description or ""
-                }
+                # Construct query based on whether company is specified
+                if request.company_name:
+                    # Dynamic question generation - construct a query for the agent
+                    company_query = f"Find me {request.num_questions} recent {request.company_name} {request.difficulty} difficulty software engineer interview questions"
+                    kwargs = {
+                        "difficulty": request.difficulty,
+                        "num_questions": request.num_questions,
+                        "job_description": request.job_description or "",
+                        "company_query": company_query  # Pass the constructed query
+                    }
+                else:
+                    # Static question selection
+                    kwargs = {
+                        "difficulty": request.difficulty,
+                        "num_questions": request.num_questions,
+                        "job_description": request.job_description or ""
+                    }
             elif request.mode == "evaluate_code":
                 kwargs = {
                     "question_id": request.question_id,

@@ -157,7 +157,7 @@ with tab1:
     
     with col1:
         job_title = st.text_input("Job Title", value="Senior Software Engineer", key="job_title")
-        company_name = st.text_input("Company Name", value="TechCorp", key="company_name")
+        company_name = st.text_input("Company Name", value="TechCorp", key="research_company_name")
     
     with col2:
         st.markdown("### Research Options")
@@ -248,34 +248,42 @@ with tab2:
             )
         
         with col3:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🚀 Start Interview", use_container_width=True, type="primary"):
-                if client:
-                    # Create placeholder for streaming output
-                    output_placeholder = st.empty()
-                    full_response = ""
+            company_name = st.text_input(
+                "Company Name (Optional)",
+                placeholder="e.g., Google, Meta",
+                help="Leave empty for general questions, or specify a company for tailored questions",
+                key="interview_company_name"
+            )
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🚀 Start Interview", use_container_width=True, type="primary"):
+            if client:
+                # Create placeholder for streaming output
+                output_placeholder = st.empty()
+                full_response = ""
+                
+                try:
+                    with st.spinner("🎯 Selecting questions..."):
+                        # Use streaming endpoint
+                        for chunk in client.start_mock_interview_streaming(
+                            session_id=st.session_state.session_id,
+                            user_id=st.session_state.get("user_id", "demo_user"),
+                            difficulty=difficulty,
+                            num_questions=num_questions,
+                            job_description=st.session_state.get("research_results", ""),
+                            company_name=company_name if company_name else None
+                        ):
+                            full_response += chunk
+                            # Update display in real-time
+                            output_placeholder.markdown(f"**Generating Questions:**\n\n{full_response}")
                     
-                    try:
-                        with st.spinner("🎯 Selecting questions..."):
-                            # Use streaming endpoint
-                            for chunk in client.start_mock_interview_streaming(
-                                session_id=st.session_state.session_id,
-                                user_id=st.session_state.get("user_id", "demo_user"),
-                                difficulty=difficulty,
-                                num_questions=num_questions,
-                                job_description=st.session_state.get("research_results", "")
-                            ):
-                                full_response += chunk
-                                # Update display in real-time
-                                output_placeholder.markdown(f"**Generating Questions:**\n\n{full_response}")
-                        
-                        # Parse questions from response (assuming they're in the text)
-                        # For now, store the full response
-                        st.session_state["interview_questions"] = full_response
-                        st.success(f"✅ Interview questions generated!")
-                        
-                    except Exception as e:
-                        st.error(f"Failed to start interview: {e}")
+                    # Parse questions from response (assuming they're in the text)
+                    # For now, store the full response
+                    st.session_state["interview_questions"] = full_response
+                    st.success(f"✅ Interview questions generated!")
+                    
+                except Exception as e:
+                    st.error(f"Failed to start interview: {e}")
     
     # Display interview questions if available
     if "interview_questions" in st.session_state and st.session_state["interview_questions"]:
