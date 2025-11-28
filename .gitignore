@@ -1,4 +1,3 @@
-Notebooks/
 .qodo
 .env
 system.md
@@ -17,7 +16,5 @@ DELIVERABLES.md
 STREAMLIT_TEST.md
 TESTING.md
 .env.example
-REMAINING_DELIVERABLES.md
-docs/
 scripts/
 DOCKER_QUICKSTART.md

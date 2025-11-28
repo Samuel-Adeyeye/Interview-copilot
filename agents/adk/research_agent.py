@@ -46,6 +46,11 @@ class ResearchPacket(BaseModel):
     )
 
 
+from google.adk.tools.mcp_tool.mcp_toolset import McpToolset
+from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
+from mcp import StdioServerParameters
+import os
+
 def create_research_agent(
     model: Optional[Gemini] = None,
     memory_bank = None,
@@ -54,7 +59,7 @@ def create_research_agent(
     """
     Create ADK Research Agent.
     
-    This agent uses Google Search to research companies and their interview processes,
+    This agent uses the Brave Search MCP server to research companies and their interview processes,
     then structures the information into a ResearchPacket.
     
     Args:
@@ -64,24 +69,82 @@ def create_research_agent(
     
     Returns:
         LlmAgent configured for research tasks
-    
-    Example:
-        >>> agent = create_research_agent()
-        >>> # Use with Runner to execute research
     """
     # Get model if not provided
     if model is None:
         model = get_gemini_model(model_name)
     
-    # Create search tool
-    search_tool = create_adk_search_tool()
+    # Check if npx is available
+    import shutil
+    npx_path = shutil.which("npx")
     
-    # Create agent with structured output capability
-    # Note: ADK agents can use structured output via Gemini's native support
-    agent = LlmAgent(
-        name="ResearchAgent",
-        model=model,
-        instruction="""You are a specialized research agent for interview preparation.
+    # If not in PATH, check common locations
+    if not npx_path and os.path.exists("/usr/local/bin/npx"):
+        npx_path = "/usr/local/bin/npx"
+    
+    # Create Brave Search MCP Toolset if npx is available and API key is present
+    brave_api_key = os.getenv("BRAVE_API_KEY")
+    use_mcp = False
+    
+    if npx_path and brave_api_key:
+        try:
+            mcp_toolset = McpToolset(
+                connection_params=StdioConnectionParams(
+                    server_params=StdioServerParameters(
+                        command=npx_path,  # Use the resolved path
+                        args=["-y", "@modelcontextprotocol/server-brave-search"],
+                        env={
+                            **os.environ, 
+                            "BRAVE_API_KEY": brave_api_key,
+                            "PATH": f"/usr/local/bin:{os.environ.get('PATH', '')}"
+                        }
+                    ),
+                    timeout=30
+                )
+            )
+            tools = [mcp_toolset]
+            use_mcp = True
+            logger.info("✅ Using Brave Search MCP Tool")
+        except Exception as e:
+            logger.error(f"Failed to initialize MCP tool: {e}")
+            tools = [create_adk_search_tool()]
+    else:
+        if not npx_path:
+            logger.warning("⚠️ 'npx' not found. Falling back to standard Google Search.")
+        if not brave_api_key:
+            logger.warning("⚠️ BRAVE_API_KEY not found. Falling back to standard Google Search.")
+        tools = [create_adk_search_tool()]
+
+    # Set instructions based on available tool
+    if use_mcp:
+        instruction = """You are a specialized research agent for interview preparation.
+
+Your task is to research companies and their interview processes using the Brave Search MCP tool.
+
+IMPORTANT: The tool name is 'brave_web_search'. Do NOT use 'brave_search'.
+
+When given a company name and job description:
+1. Use 'brave_web_search' to find current information about:
+   - Company overview, mission, and values
+   - Interview process and experience from candidates
+   - Technology stack and engineering practices
+   - Recent news and developments
+   - Company culture and work environment
+
+2. Structure your findings into a comprehensive research packet with:
+   - Company overview
+   - Interview process details
+   - Technology stack (list of technologies)
+   - Recent news (list of key developments)
+   - Preparation tips (specific, actionable advice)
+
+3. Always use the 'brave_web_search' tool to get current, accurate information.
+4. If search results are limited, infer reasonable information from the job description.
+5. Provide complete, structured information in your response.
+
+Your output should be well-organized and directly useful for interview preparation."""
+    else:
+        instruction = """You are a specialized research agent for interview preparation.
 
 Your task is to research companies and their interview processes using the google_search tool.
 
@@ -104,12 +167,18 @@ When given a company name and job description:
 4. If search results are limited, infer reasonable information from the job description.
 5. Provide complete, structured information in your response.
 
-Your output should be well-organized and directly useful for interview preparation.""",
-        tools=[search_tool],
+Your output should be well-organized and directly useful for interview preparation."""
+
+    # Create agent with structured output capability
+    agent = LlmAgent(
+        name="ResearchAgent",
+        model=model,
+        instruction=instruction,
+        tools=tools,
         output_key="research_packet"  # Store result in session state
     )
     
-    logger.info("✅ ADK Research Agent created")
+    logger.info(f"✅ ADK Research Agent created (MCP: {use_mcp})")
     return agent
 
 
