@@ -67,6 +67,8 @@ async def get_session(
         
         return SessionResponse(**session)
     
+    except SessionNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
@@ -120,6 +122,8 @@ async def resume_session(
             "message": "Session resumed successfully"
         }
     
+    except SessionNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
@@ -149,6 +153,8 @@ async def get_session_summary(
             "performance_score": 0  # Mock
         }
     
+    except SessionNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:

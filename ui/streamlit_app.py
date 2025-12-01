@@ -69,7 +69,7 @@ if 'evaluation_results' not in st.session_state:
 def get_client():
     """Get or create API client"""
     try:
-        return InterviewCoPilotSyncClient(base_url="http://localhost:8000", timeout=60.0)
+        return InterviewCoPilotSyncClient(base_url="http://localhost:8002", timeout=60.0)
     except Exception as e:
         st.error(f"Failed to initialize API client: {e}")
         return None
@@ -157,7 +157,7 @@ with tab1:
     
     with col1:
         job_title = st.text_input("Job Title", value="Senior Software Engineer", key="job_title")
-        company_name = st.text_input("Company Name", value="TechCorp", key="company_name")
+        company_name = st.text_input("Company Name", value="TechCorp", key="research_company_name")
     
     with col2:
         st.markdown("### Research Options")
@@ -172,40 +172,50 @@ with tab1:
     )
     
     col1, col2 = st.columns([1, 4])
+    run_research = False
     with col1:
         if st.button("🔍 Run Research", use_container_width=True, type="primary"):
-            if not jd_text:
-                st.error("Please enter a job description")
-            elif client:
-                # Create a placeholder for streaming output
-                output_placeholder = st.empty()
-                full_response = ""
-                
-                try:
-                    with st.spinner("🔍 Researching company and interview process..."):
-                        # Use streaming endpoint
-                        for chunk in client.run_research_streaming(
-                            session_id=st.session_state.session_id,
-                            company_name=company_name,
-                            job_description=jd_text,
-                            user_id=st.session_state.get("user_id", "demo_user")
-                        ):
-                            full_response += chunk
-                            # Update display in real-time
-                            output_placeholder.markdown(f"**Research Results:**\n\n{full_response}")
-                    
-                    st.success("✅ Research complete!")
-                    
-                    # Store in session state
-                    st.session_state["research_results"] = full_response
-                    
-                except Exception as e:
-                    st.error(f"Research failed: {e}")
+            run_research = True
+            
+    # Create a placeholder for results below the button/columns
+    results_area = st.empty()
     
-    # Display research results if available
+    if run_research:
+        if not jd_text:
+            st.error("Please enter a job description")
+        elif client:
+            try:
+                # Stream into the results area using the expander style
+                with results_area.container():
+                    with st.expander("📊 Research Results", expanded=True):
+                        output_placeholder = st.empty()
+                        full_response = ""
+                        
+                        with st.spinner("🔍 Researching company and interview process..."):
+                            # Use streaming endpoint
+                            for chunk in client.run_research_streaming(
+                                session_id=st.session_state.session_id,
+                                company_name=company_name,
+                                job_description=jd_text,
+                                user_id=st.session_state.get("user_id", "demo_user")
+                            ):
+                                full_response += chunk
+                                # Update display in real-time
+                                output_placeholder.markdown(full_response)
+                
+                st.success("✅ Research complete!")
+                
+                # Store in session state
+                st.session_state["research_results"] = full_response
+                
+            except Exception as e:
+                st.error(f"Research failed: {e}")
+    
+    # Display research results if available (and not currently running, or to overwrite/persist)
     if "research_results" in st.session_state and st.session_state["research_results"]:
-        with st.expander("📊 Research Results", expanded=True):
-            st.markdown(st.session_state["research_results"])
+        with results_area.container():
+            with st.expander("📊 Research Results", expanded=True):
+                st.markdown(st.session_state["research_results"])
     
     # Display parsed JD if available
     if jd_text and use_llm_parsing:
@@ -238,34 +248,42 @@ with tab2:
             )
         
         with col3:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("🚀 Start Interview", use_container_width=True, type="primary"):
-                if client:
-                    # Create placeholder for streaming output
-                    output_placeholder = st.empty()
-                    full_response = ""
+            company_name = st.text_input(
+                "Company Name (Optional)",
+                placeholder="e.g., Google, Meta",
+                help="Leave empty for general questions, or specify a company for tailored questions",
+                key="interview_company_name"
+            )
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🚀 Start Interview", use_container_width=True, type="primary"):
+            if client:
+                # Create placeholder for streaming output
+                output_placeholder = st.empty()
+                full_response = ""
+                
+                try:
+                    with st.spinner("🎯 Selecting questions..."):
+                        # Use streaming endpoint
+                        for chunk in client.start_mock_interview_streaming(
+                            session_id=st.session_state.session_id,
+                            user_id=st.session_state.get("user_id", "demo_user"),
+                            difficulty=difficulty,
+                            num_questions=num_questions,
+                            job_description=st.session_state.get("research_results", ""),
+                            company_name=company_name if company_name else None
+                        ):
+                            full_response += chunk
+                            # Update display in real-time
+                            output_placeholder.markdown(f"**Generating Questions:**\n\n{full_response}")
                     
-                    try:
-                        with st.spinner("🎯 Selecting questions..."):
-                            # Use streaming endpoint
-                            for chunk in client.start_mock_interview_streaming(
-                                session_id=st.session_state.session_id,
-                                user_id=st.session_state.get("user_id", "demo_user"),
-                                difficulty=difficulty,
-                                num_questions=num_questions,
-                                job_description=st.session_state.get("research_results", "")
-                            ):
-                                full_response += chunk
-                                # Update display in real-time
-                                output_placeholder.markdown(f"**Generating Questions:**\n\n{full_response}")
-                        
-                        # Parse questions from response (assuming they're in the text)
-                        # For now, store the full response
-                        st.session_state["interview_questions"] = full_response
-                        st.success(f"✅ Interview questions generated!")
-                        
-                    except Exception as e:
-                        st.error(f"Failed to start interview: {e}")
+                    # Parse questions from response (assuming they're in the text)
+                    # For now, store the full response
+                    st.session_state["interview_questions"] = full_response
+                    st.success(f"✅ Interview questions generated!")
+                    
+                except Exception as e:
+                    st.error(f"Failed to start interview: {e}")
     
     # Display interview questions if available
     if "interview_questions" in st.session_state and st.session_state["interview_questions"]:
@@ -298,25 +316,34 @@ with tab2:
                     help="Enter the ID of the question you are solving (e.g., q1, q2)"
                 )
             
+            submit_code = False
             if st.button("✅ Submit Code", type="primary"):
+                submit_code = True
+            
+            # Create a placeholder for results below the button
+            eval_results_area = st.empty()
+            
+            if submit_code:
                 if not code_input or not question_id:
                     st.error("Please provide both code and question ID.")
                 elif client:
-                    # Create placeholder for streaming evaluation
-                    eval_placeholder = st.empty()
-                    full_eval = ""
-                    
                     try:
-                        with st.spinner("🧪 Evaluating code..."):
-                            for chunk in client.submit_code_streaming(
-                                session_id=st.session_state.session_id,
-                                user_id=st.session_state.get("user_id", "demo_user"),
-                                question_id=question_id,
-                                code=code_input,
-                                language=language
-                            ):
-                                full_eval += chunk
-                                eval_placeholder.markdown(f"**Evaluation Results:**\n\n{full_eval}")
+                        # Stream into the results area using the expander style
+                        with eval_results_area.container():
+                            with st.expander("📊 Evaluation Results", expanded=True):
+                                eval_placeholder = st.empty()
+                                full_eval = ""
+                                
+                                with st.spinner("🧪 Evaluating code..."):
+                                    for chunk in client.submit_code_streaming(
+                                        session_id=st.session_state.session_id,
+                                        user_id=st.session_state.get("user_id", "demo_user"),
+                                        question_id=question_id,
+                                        code=code_input,
+                                        language=language
+                                    ):
+                                        full_eval += chunk
+                                        eval_placeholder.markdown(full_eval)
                         
                         st.success("✅ Evaluation complete!")
                         st.session_state["evaluation_results"] = full_eval
@@ -324,10 +351,11 @@ with tab2:
                     except Exception as e:
                         st.error(f"Evaluation failed: {e}")
     
-    # Display evaluation results if available
+    # Display evaluation results if available (and not currently running, or to overwrite/persist)
     if "evaluation_results" in st.session_state and st.session_state["evaluation_results"]:
-        with st.expander("📊 Evaluation Results", expanded=True):
-            st.markdown(st.session_state["evaluation_results"])
+        with eval_results_area.container():
+            with st.expander("📊 Evaluation Results", expanded=True):
+                st.markdown(st.session_state["evaluation_results"])
     
     # Prompt to start if no questions generated yet
     if "interview_questions" not in st.session_state or not st.session_state["interview_questions"]:

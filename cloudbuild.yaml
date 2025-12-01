@@ -1,0 +1,116 @@
+# Google Cloud Build Configuration
+# CI/CD pipeline for Interview Copilot
+
+steps:
+  # Step 1: Build API Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-api'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-api:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-api:latest'
+      - '-f'
+      - 'Dockerfile'
+      - '.'
+
+  # Step 2: Build Streamlit UI Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-ui'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-ui:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-ui:latest'
+      - '-f'
+      - 'Dockerfile.streamlit'
+      - '.'
+
+  # Step 3: Push API image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-api'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-api:$COMMIT_SHA'
+    waitFor: ['build-api']
+
+  # Step 4: Push UI image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-ui'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-ui:$COMMIT_SHA'
+    waitFor: ['build-ui']
+
+  # Step 5: Run integration tests
+  - name: 'gcr.io/$PROJECT_ID/interview-copilot-api:$COMMIT_SHA'
+    id: 'integration-tests'
+    entrypoint: 'python'
+    args: ['-m', 'pytest', 'tests/integration/', '-v']
+    env:
+      - 'ENVIRONMENT=test'
+    waitFor: ['push-api']
+
+  # Step 6: Deploy API to Cloud Run (Production)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-api-prod'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'interview-copilot-api-prod'
+      - '--image=gcr.io/$PROJECT_ID/interview-copilot-api:$COMMIT_SHA'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--set-env-vars=ENVIRONMENT=production'
+      - '--set-secrets=GOOGLE_API_KEY=GOOGLE_API_KEY:latest,BRAVE_API_KEY=BRAVE_API_KEY:latest,JUDGE0_API_KEY=JUDGE0_API_KEY:latest,DATABASE_URL=DATABASE_URL_PROD:latest'
+      - '--add-cloudsql-instances=$_CLOUD_SQL_INSTANCE_PROD'
+      - '--memory=2Gi'
+      - '--cpu=2'
+      - '--max-instances=10'
+      - '--min-instances=1'
+      - '--timeout=300'
+    waitFor: ['integration-tests']
+
+  # Step 7: Deploy UI to Cloud Run (Production)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-ui-prod'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'interview-copilot-ui-prod'
+      - '--image=gcr.io/$PROJECT_ID/interview-copilot-ui:$COMMIT_SHA'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--set-env-vars=API_BASE_URL=https://interview-copilot-api-prod-${_CLOUD_RUN_SUFFIX}.run.app,ENVIRONMENT=production'
+      - '--memory=1Gi'
+      - '--cpu=1'
+      - '--max-instances=5'
+      - '--min-instances=1'
+      - '--timeout=300'
+    waitFor: ['deploy-api-prod']
+
+# Substitution variables
+substitutions:
+  _CLOUD_SQL_INSTANCE_PROD: 'PROJECT_ID:REGION:interview-copilot-db-prod'
+  _CLOUD_RUN_SUFFIX: 'REPLACE_WITH_YOUR_CLOUD_RUN_SUFFIX'
+
+# Build timeout
+timeout: '1800s'
+
+# Images to be pushed to Container Registry
+images:
+  - 'gcr.io/$PROJECT_ID/interview-copilot-api:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/interview-copilot-api:latest'
+  - 'gcr.io/$PROJECT_ID/interview-copilot-ui:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/interview-copilot-ui:latest'
+
+# Build options
+options:
+  machineType: 'N1_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY

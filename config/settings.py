@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.7
     
     # ADK/Gemini Settings
-    ADK_MODEL: str = "gemini-2.5-flash-lite"  # Default ADK model
+    ADK_MODEL: str = "gemini-2.0-flash-exp"  # Supports tools/function calling
     ADK_TEMPERATURE: float = 0.7
     ADK_RETRY_ATTEMPTS: int = 5
     ADK_RETRY_BASE: int = 7

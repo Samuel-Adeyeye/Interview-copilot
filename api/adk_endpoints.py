@@ -44,6 +44,7 @@ class ADKTechnicalRequest(BaseModel):
     code: Optional[str] = None
     language: Optional[str] = Field("python", pattern="^(python|javascript|java|cpp)$")
     job_description: Optional[str] = None
+    company_name: Optional[str] = None
 
 
 class ADKWorkflowRequest(BaseModel):
@@ -95,9 +96,16 @@ async def run_research_adk(
                 job_description=request.job_description
             ):
                 if event.content and event.content.parts:
-                    text = event.content.parts[0].text
-                    full_response += text
-                    yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
+                    for part in event.content.parts:
+                        if hasattr(part, 'text') and part.text:
+                            text = part.text
+                            full_response += text
+                            yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
+                        elif hasattr(part, 'function_call'):
+                            # Log function calls but don't break the stream
+                            logger.info(f"Research agent calling tool: {part.function_call.name}")
+                            # Optional: yield a progress event
+                            # yield f"data: {json.dumps({'text': '', 'type': 'progress', 'detail': f'Using tool: {part.function_call.name}'})}\n\n"
             
             # Final response
             yield f"data: {json.dumps({'text': full_response, 'type': 'complete'})}\n\n"
@@ -149,11 +157,23 @@ async def run_technical_adk(
             kwargs = {}
             
             if request.mode == "select_questions":
-                kwargs = {
-                    "difficulty": request.difficulty,
-                    "num_questions": request.num_questions,
-                    "job_description": request.job_description or ""
-                }
+                # Construct query based on whether company is specified
+                if request.company_name:
+                    # Dynamic question generation - construct a query for the agent
+                    company_query = f"Find me {request.num_questions} recent {request.company_name} {request.difficulty} difficulty software engineer interview questions"
+                    kwargs = {
+                        "difficulty": request.difficulty,
+                        "num_questions": request.num_questions,
+                        "job_description": request.job_description or "",
+                        "company_query": company_query  # Pass the constructed query
+                    }
+                else:
+                    # Static question selection
+                    kwargs = {
+                        "difficulty": request.difficulty,
+                        "num_questions": request.num_questions,
+                        "job_description": request.job_description or ""
+                    }
             elif request.mode == "evaluate_code":
                 kwargs = {
                     "question_id": request.question_id,
@@ -252,9 +272,13 @@ async def run_workflow_adk(
                 message=workflow_message
             ):
                 if event.content and event.content.parts:
-                    text = event.content.parts[0].text
-                    full_response += text
-                    yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
+                    for part in event.content.parts:
+                        if hasattr(part, 'text') and part.text:
+                            text = part.text
+                            full_response += text
+                            yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
+                        elif hasattr(part, 'function_call'):
+                            logger.info(f"Workflow agent calling tool: {part.function_call.name}")
             
             # Final response
             yield f"data: {json.dumps({'text': full_response, 'type': 'complete'})}\n\n"

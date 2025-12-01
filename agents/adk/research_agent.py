@@ -54,7 +54,7 @@ def create_research_agent(
     """
     Create ADK Research Agent.
     
-    This agent uses Google Search to research companies and their interview processes,
+    This agent uses ADK's built-in google_search tool to research companies and their interview processes,
     then structures the information into a ResearchPacket.
     
     Args:
@@ -64,24 +64,15 @@ def create_research_agent(
     
     Returns:
         LlmAgent configured for research tasks
-    
-    Example:
-        >>> agent = create_research_agent()
-        >>> # Use with Runner to execute research
     """
     # Get model if not provided
     if model is None:
         model = get_gemini_model(model_name)
     
-    # Create search tool
-    search_tool = create_adk_search_tool()
-    
-    # Create agent with structured output capability
-    # Note: ADK agents can use structured output via Gemini's native support
-    agent = LlmAgent(
-        name="ResearchAgent",
-        model=model,
-        instruction="""You are a specialized research agent for interview preparation.
+    # Use ADK's built-in google_search tool
+    tools = [create_adk_search_tool()]
+
+    instruction = """You are a specialized research agent for interview preparation.
 
 Your task is to research companies and their interview processes using the google_search tool.
 
@@ -104,12 +95,18 @@ When given a company name and job description:
 4. If search results are limited, infer reasonable information from the job description.
 5. Provide complete, structured information in your response.
 
-Your output should be well-organized and directly useful for interview preparation.""",
-        tools=[search_tool],
+Your output should be well-organized and directly useful for interview preparation."""
+
+    # Create agent with structured output capability
+    agent = LlmAgent(
+        name="ResearchAgent",
+        model=model,
+        instruction=instruction,
+        tools=tools,
         output_key="research_packet"  # Store result in session state
     )
     
-    logger.info("✅ ADK Research Agent created")
+    logger.info("✅ ADK Research Agent created with google_search tool")
     return agent
 
 

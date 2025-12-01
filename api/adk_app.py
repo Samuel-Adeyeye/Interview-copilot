@@ -310,8 +310,25 @@ Use get_question_by_id() to get test cases, then execute the code and provide co
             difficulty = kwargs.get("difficulty", "medium")
             num_questions = kwargs.get("num_questions", 3)
             job_description = kwargs.get("job_description", "")
+            company_query = kwargs.get("company_query")
             
-            message = f"""Select {num_questions} {difficulty} difficulty coding interview questions.
+            if company_query:
+                # Dynamic question generation - use the company-specific query
+                message = f"""{company_query}
+
+Use the 'brave_web_search' tool to find recent interview questions for the specified company.
+Parse the search results and format them into the standard question structure with:
+- Title
+- Difficulty
+- Description
+- Examples (Input/Output)
+- Test Cases (2-3 simple test cases)
+- Hints
+
+Return {num_questions} well-formatted questions."""
+            else:
+                # Static question selection from bank
+                message = f"""Select {num_questions} {difficulty} difficulty coding interview questions.
 
 Job Description Context:
 {job_description[:500] if job_description else 'General software engineering position'}

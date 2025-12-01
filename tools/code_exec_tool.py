@@ -141,8 +141,8 @@ class CodeExecutionTool:
                     logger.error(f"Code execution error: {e}")
             
             # Check if output matches expected (normalize whitespace)
-            actual_output = result.get("stdout", "").strip()
-            expected_output_clean = expected_output.strip()
+            actual_output = str(result.get("stdout") or "").strip()
+            expected_output_clean = str(expected_output or "").strip()
             
             # More flexible comparison (handle list/array formatting differences)
             passed = self._compare_outputs(actual_output, expected_output_clean)
@@ -195,6 +195,13 @@ class CodeExecutionTool:
         expected_norm = re.sub(r'\s+', ' ', expected.strip())
         if actual_norm == expected_norm:
             return True
+            
+        # Check if expected output is one of the lines in actual output
+        # This handles cases where user includes manual print statements for multiple tests
+        if '\n' in actual:
+            actual_lines = [re.sub(r'\s+', ' ', line.strip()) for line in actual.split('\n') if line.strip()]
+            if expected_norm in actual_lines:
+                return True
         
         return False
     

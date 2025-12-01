@@ -6,8 +6,14 @@ Configuration and helper functions for Google's Agent Development Kit
 from google.genai import types
 from config.settings import settings
 import logging
+import os
 
 logger = logging.getLogger(__name__)
+
+# Ensure GOOGLE_API_KEY is in environment for ADK/GenAI libraries
+if settings.GOOGLE_API_KEY and "GOOGLE_API_KEY" not in os.environ:
+    os.environ["GOOGLE_API_KEY"] = settings.GOOGLE_API_KEY
+
 
 
 def get_retry_config() -> types.HttpRetryOptions:

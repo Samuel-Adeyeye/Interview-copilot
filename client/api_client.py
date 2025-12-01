@@ -7,7 +7,7 @@ class InterviewCoPilotClient:
     Python client for Interview Co-Pilot API
     """
     
-    def __init__(self, base_url: str = "http://localhost:8000", timeout: float = 30.0):
+    def __init__(self, base_url: str = "http://localhost:8002", timeout: float = 30.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._session = None  # Lazy initialization
@@ -210,7 +210,7 @@ class InterviewCoPilotSyncClient:
     Designed for use with Streamlit and other synchronous environments
     """
     
-    def __init__(self, base_url: str = "http://localhost:8000", timeout: float = 30.0):
+    def __init__(self, base_url: str = "http://localhost:8002", timeout: float = 30.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._session = None
@@ -433,7 +433,8 @@ class InterviewCoPilotSyncClient:
         user_id: str,
         difficulty: str = "medium",
         num_questions: int = 3,
-        job_description: str = None
+        job_description: str = None,
+        company_name: str = None
     ):
         """
         Start mock interview using ADK v2 streaming endpoint.
@@ -450,7 +451,8 @@ class InterviewCoPilotSyncClient:
                 "mode": "select_questions",
                 "difficulty": difficulty,
                 "num_questions": num_questions,
-                "job_description": job_description
+                "job_description": job_description,
+                "company_name": company_name
             },
             timeout=120.0
         ) as response:
@@ -499,17 +501,22 @@ class InterviewCoPilotSyncClient:
             response.raise_for_status()
             
             # Parse Server-Sent Events
+            has_yielded_chunks = False
             for line in response.iter_lines():
                 if line.startswith("data: "):
                     data_str = line[6:]
                     try:
                         data = json.loads(data_str)
                         if data.get("type") == "chunk":
-                            yield data.get("text", "")
+                            text = data.get("text", "")
+                            if text:
+                                yield text
+                                has_yielded_chunks = True
                         elif data.get("type") == "complete":
-                            # Yield final complete text before breaking
+                            # Yield final complete text ONLY if no chunks were yielded
+                            # This prevents duplication since 'complete' contains the full text
                             final_text = data.get("text", "")
-                            if final_text:
+                            if final_text and not has_yielded_chunks:
                                 yield final_text
                             break
                         elif data.get("type") == "error":
