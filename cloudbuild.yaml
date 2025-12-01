@@ -118,7 +118,7 @@ steps:
 # Substitution variables
 substitutions:
   _CLOUD_SQL_INSTANCE_PROD: 'gen-lang-client-0503649694:us-central1:interview-copilot-prod'
-  _CLOUD_RUN_SUFFIX: 'REPLACE_WITH_NEW_US_CENTRAL1_SUFFIX'
+  _CLOUD_RUN_SUFFIX: '270912131800.us-central1.run.app'
 
 # Build timeout
 timeout: '1800s'
