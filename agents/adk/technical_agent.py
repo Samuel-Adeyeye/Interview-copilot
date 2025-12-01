@@ -15,7 +15,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-from tools.adk.mcp_tools import create_brave_search_mcp_tool
+from tools.adk.search_tool import create_adk_search_tool
 
 def create_technical_agent(
     model: Optional[Gemini] = None,
@@ -30,7 +30,7 @@ def create_technical_agent(
     
     This agent can:
     1. Select coding questions based on difficulty (Static)
-    2. Generate company-specific questions using Brave Search MCP (Dynamic)
+    2. Generate company-specific questions using google_search (Dynamic)
     3. Evaluate submitted code solutions
     
     Args:
@@ -63,16 +63,15 @@ def create_technical_agent(
             code_exec_tool = create_judge0_code_exec_tool(judge0_api_key)
             code_executor = None
     
-    # Try to create MCP tool for dynamic questions
-    mcp_toolset = create_brave_search_mcp_tool()
+    # Add ADK's built-in google_search tool for dynamic questions
+    search_tool = create_adk_search_tool()
     
     # Collect all tools
     tools = list(question_bank_tools)
     if code_exec_tool:
         tools.append(code_exec_tool)
-    if mcp_toolset:
-        tools.append(mcp_toolset)
-        logger.info("✅ Technical Agent enabled with Brave Search MCP for dynamic questions")
+    tools.append(search_tool)
+    logger.info("✅ Technical Agent enabled with google_search for dynamic questions")
     
     # Create agent instruction
     instruction = """You are a technical interview assistant specializing in coding interviews.
@@ -86,7 +85,7 @@ You have three main capabilities:
    - Return questions with full details (description, examples, test cases, hints)
 
 2. **Dynamic Question Generation** (when user asks for specific company questions):
-   - Use 'brave_web_search' to find recent interview questions for the requested company (e.g., "latest Google software engineer interview questions leetcode")
+   - Use 'google_search' to find recent interview questions for the requested company (e.g., "latest Google software engineer interview questions leetcode")
    - Parse the search results to identify real interview questions
    - Format the found questions into the standard structure:
      * Title
@@ -159,12 +158,11 @@ def create_question_selection_agent(
     # Get static question bank tools
     question_tools = create_question_bank_tools()
     
-    # Try to add Brave Search MCP for dynamic questions
-    mcp_toolset = create_brave_search_mcp_tool()
+    # Add ADK's built-in google_search tool for dynamic questions
+    search_tool = create_adk_search_tool()
     tools = list(question_tools)
-    if mcp_toolset:
-        tools.append(mcp_toolset)
-        logger.info("✅ Question Selection Agent enabled with Brave Search MCP")
+    tools.append(search_tool)
+    logger.info("✅ Question Selection Agent enabled with google_search")
     
     agent = LlmAgent(
         name="QuestionSelectionAgent",
@@ -185,7 +183,7 @@ You have two modes:
    - Search for specific topics if needed
 
 2. **Dynamic Question Generation** (when company is specified in the query):
-   - Use 'brave_web_search' to find recent interview questions for the specified company
+   - Use 'google_search' to find recent interview questions for the specified company
    - Parse search results to identify real interview questions
    - Format questions into the standard structure:
      * Title

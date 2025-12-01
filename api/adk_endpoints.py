@@ -96,9 +96,16 @@ async def run_research_adk(
                 job_description=request.job_description
             ):
                 if event.content and event.content.parts:
-                    text = event.content.parts[0].text
-                    full_response += text
-                    yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
+                    for part in event.content.parts:
+                        if hasattr(part, 'text') and part.text:
+                            text = part.text
+                            full_response += text
+                            yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
+                        elif hasattr(part, 'function_call'):
+                            # Log function calls but don't break the stream
+                            logger.info(f"Research agent calling tool: {part.function_call.name}")
+                            # Optional: yield a progress event
+                            # yield f"data: {json.dumps({'text': '', 'type': 'progress', 'detail': f'Using tool: {part.function_call.name}'})}\n\n"
             
             # Final response
             yield f"data: {json.dumps({'text': full_response, 'type': 'complete'})}\n\n"
@@ -265,9 +272,13 @@ async def run_workflow_adk(
                 message=workflow_message
             ):
                 if event.content and event.content.parts:
-                    text = event.content.parts[0].text
-                    full_response += text
-                    yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
+                    for part in event.content.parts:
+                        if hasattr(part, 'text') and part.text:
+                            text = part.text
+                            full_response += text
+                            yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
+                        elif hasattr(part, 'function_call'):
+                            logger.info(f"Workflow agent calling tool: {part.function_call.name}")
             
             # Final response
             yield f"data: {json.dumps({'text': full_response, 'type': 'complete'})}\n\n"

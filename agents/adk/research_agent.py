@@ -46,8 +46,6 @@ class ResearchPacket(BaseModel):
     )
 
 
-from tools.adk.mcp_tools import create_brave_search_mcp_tool
-
 def create_research_agent(
     model: Optional[Gemini] = None,
     memory_bank = None,
@@ -56,7 +54,7 @@ def create_research_agent(
     """
     Create ADK Research Agent.
     
-    This agent uses the Brave Search MCP server to research companies and their interview processes,
+    This agent uses ADK's built-in google_search tool to research companies and their interview processes,
     then structures the information into a ResearchPacket.
     
     Args:
@@ -71,47 +69,10 @@ def create_research_agent(
     if model is None:
         model = get_gemini_model(model_name)
     
-    # Try to create MCP tool
-    mcp_toolset = create_brave_search_mcp_tool()
-    
-    if mcp_toolset:
-        tools = [mcp_toolset]
-        use_mcp = True
-    else:
-        # Fallback to standard search tool
-        tools = [create_adk_search_tool()]
-        use_mcp = False
+    # Use ADK's built-in google_search tool
+    tools = [create_adk_search_tool()]
 
-    # Set instructions based on available tool
-    if use_mcp:
-        instruction = """You are a specialized research agent for interview preparation.
-
-Your task is to research companies and their interview processes using the Brave Search MCP tool.
-
-IMPORTANT: The tool name is 'brave_web_search'. Do NOT use 'brave_search'.
-
-When given a company name and job description:
-1. Use 'brave_web_search' to find current information about:
-   - Company overview, mission, and values
-   - Interview process and experience from candidates
-   - Technology stack and engineering practices
-   - Recent news and developments
-   - Company culture and work environment
-
-2. Structure your findings into a comprehensive research packet with:
-   - Company overview
-   - Interview process details
-   - Technology stack (list of technologies)
-   - Recent news (list of key developments)
-   - Preparation tips (specific, actionable advice)
-
-3. Always use the 'brave_web_search' tool to get current, accurate information.
-4. If search results are limited, infer reasonable information from the job description.
-5. Provide complete, structured information in your response.
-
-Your output should be well-organized and directly useful for interview preparation."""
-    else:
-        instruction = """You are a specialized research agent for interview preparation.
+    instruction = """You are a specialized research agent for interview preparation.
 
 Your task is to research companies and their interview processes using the google_search tool.
 
@@ -145,7 +106,7 @@ Your output should be well-organized and directly useful for interview preparati
         output_key="research_packet"  # Store result in session state
     )
     
-    logger.info(f"✅ ADK Research Agent created (MCP: {use_mcp})")
+    logger.info("✅ ADK Research Agent created with google_search tool")
     return agent
 
 

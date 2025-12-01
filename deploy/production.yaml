@@ -1,0 +1,130 @@
+# Cloud Run Service Configuration - Production Environment
+# This file defines the production deployment configuration for Interview Copilot
+# Usage: gcloud run services replace deploy/production.yaml --region=us-central1
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: interview-copilot-api-prod
+  labels:
+    cloud.googleapis.com/location: us-central1
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-status: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: '10'
+        autoscaling.knative.dev/minScale: '1'
+        run.googleapis.com/cloudsql-instances: PROJECT_ID:REGION:interview-copilot-db-prod
+        run.googleapis.com/cpu-throttling: 'false'
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: PROJECT_NUMBER-compute@developer.gserviceaccount.com
+      containers:
+      - image: gcr.io/PROJECT_ID/interview-copilot-api:latest
+        ports:
+        - name: http1
+          containerPort: 8000
+        env:
+        - name: ENVIRONMENT
+          value: production
+        - name: PORT
+          value: '8000'
+        - name: GOOGLE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: GOOGLE_API_KEY
+              key: latest
+        - name: BRAVE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: BRAVE_API_KEY
+              key: latest
+        - name: JUDGE0_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: JUDGE0_API_KEY
+              key: latest
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: DATABASE_URL_PROD
+              key: latest
+        resources:
+          limits:
+            cpu: '2'
+            memory: 2Gi
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 30
+          failureThreshold: 3
+  traffic:
+  - percent: 100
+    latestRevision: true
+
+---
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: interview-copilot-ui-prod
+  labels:
+    cloud.googleapis.com/location: us-central1
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-status: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: '5'
+        autoscaling.knative.dev/minScale: '1'
+        run.googleapis.com/cpu-throttling: 'false'
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: PROJECT_NUMBER-compute@developer.gserviceaccount.com
+      containers:
+      - image: gcr.io/PROJECT_ID/interview-copilot-ui:latest
+        ports:
+        - name: http1
+          containerPort: 8501
+        env:
+        - name: ENVIRONMENT
+          value: production
+        - name: API_BASE_URL
+          value: https://interview-copilot-api-prod-CLOUD_RUN_SUFFIX.run.app
+        - name: PORT
+          value: '8501'
+        resources:
+          limits:
+            cpu: '1'
+            memory: 1Gi
+        startupProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          periodSeconds: 30
+          failureThreshold: 3
+  traffic:
+  - percent: 100
+    latestRevision: true

@@ -7,7 +7,7 @@ class InterviewCoPilotClient:
     Python client for Interview Co-Pilot API
     """
     
-    def __init__(self, base_url: str = "http://localhost:8000", timeout: float = 30.0):
+    def __init__(self, base_url: str = "http://localhost:8002", timeout: float = 30.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._session = None  # Lazy initialization
@@ -210,7 +210,7 @@ class InterviewCoPilotSyncClient:
     Designed for use with Streamlit and other synchronous environments
     """
     
-    def __init__(self, base_url: str = "http://localhost:8000", timeout: float = 30.0):
+    def __init__(self, base_url: str = "http://localhost:8002", timeout: float = 30.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._session = None
