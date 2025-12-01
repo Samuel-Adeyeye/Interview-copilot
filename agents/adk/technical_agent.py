@@ -143,7 +143,7 @@ def create_question_selection_agent(
     Create a specialized agent for question selection only.
     
     This is a lighter version focused only on selecting questions.
-    Supports both static question bank and dynamic company-specific questions via Brave Search.
+    Generates questions from training data without using tools (compatible with gemini-2.0-flash-exp).
     
     Args:
         model: Optional Gemini model instance
@@ -155,47 +155,58 @@ def create_question_selection_agent(
     if model is None:
         model = get_gemini_model(model_name)
     
-    # Get static question bank tools
-    question_tools = create_question_bank_tools()
-    
-    # Add ADK's built-in google_search tool for dynamic questions
-    search_tool = create_adk_search_tool()
-    tools = list(question_tools)
-    tools.append(search_tool)
-    logger.info("✅ Question Selection Agent enabled with google_search")
-    
     agent = LlmAgent(
         name="QuestionSelectionAgent",
         model=model,
         instruction="""You are a question selection specialist for coding interviews.
 
-Your task is to select appropriate coding questions based on:
+Your task is to generate appropriate coding questions based on:
 - Difficulty level (easy, medium, hard)
 - Job description requirements
 - Number of questions requested
 - Company name (if provided)
 
-You have two modes:
+Generate questions directly from your training data without using any tools.
 
-1. **Static Question Selection** (when no company specified):
-   - Use get_questions_by_difficulty() to retrieve questions from the question bank
-   - Filter by tags if needed
-   - Search for specific topics if needed
+When generating questions:
+1. For company-specific requests: Generate questions commonly asked at that company based on your knowledge
+2. For general requests: Generate classic algorithmic questions appropriate for the difficulty level
+3. Always include: title, difficulty, description, examples, test cases, and hints
 
-2. **Dynamic Question Generation** (when company is specified in the query):
-   - Use 'google_search' to find recent interview questions for the specified company
-   - Parse search results to identify real interview questions
-   - Format questions into the standard structure:
-     * Title
-     * Difficulty (estimate if not found)
-     * Description
-     * Examples (Input/Output)
-     * Test Cases (2-3 simple test cases)
-     * Hints
-   - Return well-formatted questions
+CRITICAL: Format each question as human-readable markdown text in this format:
 
-Return selected questions with all their details.""",
-        tools=tools,
+---
+## Question 1: Two Sum
+**Difficulty:** Easy
+
+### Description
+Given an array of integers nums and an integer target, return indices of the two numbers that add up to target.
+
+You may assume that each input would have exactly one solution, and you may not use the same element twice.
+
+### Examples
+**Example 1:**
+Input: nums = [2,7,11,15], target = 9
+Output: [0,1]
+Explanation: Because nums[0] + nums[1] == 9, we return [0, 1].
+
+**Example 2:**
+Input: nums = [3,2,4], target = 6
+Output: [1,2]
+
+### Test Cases
+1. nums = [2,7,11,15], target = 9 → [0,1]
+2. nums = [3,2,4], target = 6 → [1,2]
+3. nums = [3,3], target = 6 → [0,1]
+
+### Hints
+- Use a hash map to store seen numbers and their indices
+- For each number, check if target - number exists in the map
+- Time complexity should be O(n)
+---
+
+Generate the requested number of questions following this exact format.""",
+        tools=[],  # No tools - generate from training data
         output_key="selected_questions"
     )
     
