@@ -120,7 +120,7 @@ steps:
       - '--min-instances=0'
       - '--timeout=300'
       - '--port=8501'
-    waitFor: ['deploy-api-staging']
+    waitFor: ['deploy-api-staging', 'push-ui']
 
   # Step 8: Run smoke tests against deployed staging API (optional)
   - name: 'gcr.io/cloud-builders/curl'
