@@ -44,13 +44,42 @@ steps:
       - 'gcr.io/$PROJECT_ID/interview-copilot-ui:staging-$COMMIT_SHA'
     waitFor: ['build-ui']
 
-  # Step 5: Run integration tests
+  # Step 5: Run tests using pytest directly (no server needed)
   - name: 'gcr.io/$PROJECT_ID/interview-copilot-api:staging-$COMMIT_SHA'
-    id: 'integration-tests'
-    entrypoint: '/app/scripts/run_integration_tests.sh'
+    id: 'run-tests'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "🧪 Running tests for staging environment..."
+        
+        # Set test environment variables
+        export ENVIRONMENT=test
+        export TESTING=true
+        export PYTHONPATH=/app:$PYTHONPATH
+        
+        # Mock API keys for testing
+        export GOOGLE_API_KEY=${GOOGLE_API_KEY:-test-google-key}
+        export OPENAI_API_KEY=${OPENAI_API_KEY:-test-openai-key}
+        export TAVILY_API_KEY=${TAVILY_API_KEY:-test-tavily-key}
+        export JUDGE0_API_KEY=${JUDGE0_API_KEY:-test-judge0-key}
+        
+        echo "Running unit tests..."
+        pytest tests/unit/ -v --tb=short --maxfail=5 || exit 1
+        
+        echo ""
+        echo "Running integration tests..."
+        pytest tests/integration/ -v --tb=short --maxfail=5 || exit 1
+        
+        echo ""
+        echo "Running ADK tests..."
+        pytest tests/test_adk_*.py -v --tb=short --maxfail=5 || exit 1
+        
+        echo ""
+        echo "✅ All tests passed for staging!"
     env:
-      - 'ENVIRONMENT=staging'
-      - 'API_BASE_URL=http://localhost:8003'
+      - 'ENVIRONMENT=test'
+      - 'TESTING=true'
     waitFor: ['push-api']
 
   # Step 6: Deploy API to Cloud Run (Staging)
@@ -74,7 +103,7 @@ steps:
       - '--min-instances=0'
       - '--timeout=300'
       - '--port=8002'
-    waitFor: ['integration-tests']
+    waitFor: ['run-tests']
 
   # Step 7: Deploy UI to Cloud Run (Staging)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -95,6 +124,29 @@ steps:
       - '--min-instances=0'
       - '--timeout=300'
       - '--port=8501'
+    waitFor: ['deploy-api-staging']
+
+  # Step 8: Run smoke tests against deployed staging API (optional)
+  - name: 'gcr.io/cloud-builders/curl'
+    id: 'smoke-tests'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "🔥 Running smoke tests against staging deployment..."
+        
+        # Wait a bit for deployment to be ready
+        sleep 10
+        
+        # Test health endpoint
+        echo "Testing /health endpoint..."
+        curl -f https://interview-copilot-api-staging-${_CLOUD_RUN_SUFFIX}.run.app/health || exit 1
+        
+        # Test API root
+        echo "Testing API root..."
+        curl -f https://interview-copilot-api-staging-${_CLOUD_RUN_SUFFIX}.run.app/ || exit 1
+        
+        echo "✅ Smoke tests passed!"
     waitFor: ['deploy-api-staging']
 
 # Substitution variables
