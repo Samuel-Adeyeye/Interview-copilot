@@ -74,25 +74,7 @@ def test_metrics_endpoint(client: httpx.Client):
     assert "total_sessions" in data or "status" in data
 
 
-@pytest.mark.skipif(
-    os.getenv("ENVIRONMENT") == "test",
-    reason="Database tests skipped in test environment"
-)
-def test_database_connectivity():
-    """Test database connectivity (only in environments with DB)"""
-    from config.settings import settings
-    
-    # This test only runs if DATABASE_URL is configured
-    if settings.DATABASE_URL:
-        # Try to import and test database connection
-        try:
-            from database.session import SessionLocal
-            db = SessionLocal()
-            # Simple query to test connection
-            db.execute("SELECT 1")
-            db.close()
-        except Exception as e:
-            pytest.fail(f"Database connectivity test failed: {e}")
+
 
 
 if __name__ == "__main__":

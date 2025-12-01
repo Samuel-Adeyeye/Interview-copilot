@@ -27,6 +27,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
+# Copy scripts and make executable
+COPY scripts/ /app/scripts/
+RUN chmod +x /app/scripts/run_integration_tests.sh
+
 # Create necessary directories with proper permissions
 RUN mkdir -p /app/data/vectordb /app/data/sessions /app/logs && \
     chmod -R 755 /app/data /app/logs
@@ -44,4 +48,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Run application
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8002", "--workers", "1"]
