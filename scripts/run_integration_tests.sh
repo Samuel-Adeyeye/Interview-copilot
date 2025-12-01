@@ -3,13 +3,13 @@ set -e
 
 # Start the API server in the background
 echo "Starting API server..."
-uvicorn api.main:app --host 0.0.0.0 --port 8002 &
+uvicorn api.main:app --host 0.0.0.0 --port 8003 &
 API_PID=$!
 
 # Wait for the API to be ready
 echo "Waiting for API to be ready..."
 for i in {1..30}; do
-    if curl -s http://localhost:8002/health > /dev/null; then
+    if curl -s http://localhost:8003/health > /dev/null; then
         echo "API is ready!"
         break
     fi
@@ -19,6 +19,7 @@ done
 
 # Run the tests
 echo "Running tests..."
+export API_BASE_URL=http://localhost:8003
 pytest tests/integration/ -v
 
 # Capture the exit code of pytest

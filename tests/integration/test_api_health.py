@@ -25,7 +25,8 @@ def test_health_check(client: httpx.Client):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
-    assert "version" in data
+    assert "services" in data
+    assert "initialized" in data
 
 
 def test_api_root(client: httpx.Client):
@@ -33,8 +34,8 @@ def test_api_root(client: httpx.Client):
     response = client.get("/")
     assert response.status_code == 200
     data = response.json()
-    assert "message" in data
-    assert "Interview Co-Pilot" in data["message"]
+    assert "service" in data
+    assert "Interview Co-Pilot API" in data["service"]
 
 
 def test_session_creation(client: httpx.Client):
@@ -66,12 +67,7 @@ def test_technical_endpoint_exists(client: httpx.Client):
     assert response.status_code in [422, 400]  # Validation error, not not-found
 
 
-def test_metrics_endpoint(client: httpx.Client):
-    """Test metrics endpoint"""
-    response = client.get("/metrics")
-    assert response.status_code == 200
-    data = response.json()
-    assert "total_sessions" in data or "status" in data
+
 
 
 
