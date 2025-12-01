@@ -56,7 +56,7 @@ steps:
         # Set test environment variables
         export ENVIRONMENT=test
         export TESTING=true
-        export PYTHONPATH=/app:$PYTHONPATH
+        export PYTHONPATH=/app
         
         # Mock API keys for testing
         export GOOGLE_API_KEY=${GOOGLE_API_KEY:-test-google-key}
