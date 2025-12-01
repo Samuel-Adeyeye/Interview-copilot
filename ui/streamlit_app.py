@@ -5,6 +5,7 @@ Complete implementation with all features
 
 import streamlit as st
 import sys
+import os
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 import traceback
