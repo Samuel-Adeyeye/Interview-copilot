@@ -8,9 +8,9 @@ steps:
     args:
       - 'build'
       - '-t'
-      - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-api:staging-$COMMIT_SHA'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-api:staging-$COMMIT_SHA'
       - '-t'
-      - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-api:staging-latest'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-api:staging-latest'
       - '-f'
       - 'Dockerfile'
       - '.'
@@ -21,9 +21,9 @@ steps:
     args:
       - 'build'
       - '-t'
-      - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-ui:staging-$COMMIT_SHA'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-ui:staging-$COMMIT_SHA'
       - '-t'
-      - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-ui:staging-latest'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-ui:staging-latest'
       - '-f'
       - 'Dockerfile.streamlit'
       - '.'
@@ -33,7 +33,7 @@ steps:
     id: 'push-api'
     args:
       - 'push'
-      - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-api:staging-$COMMIT_SHA'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-api:staging-$COMMIT_SHA'
     waitFor: ['build-api']
 
   # Step 4: Push UI image to Container Registry
@@ -41,11 +41,11 @@ steps:
     id: 'push-ui'
     args:
       - 'push'
-      - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-ui:staging-$COMMIT_SHA'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-ui:staging-$COMMIT_SHA'
     waitFor: ['build-ui']
 
   # Step 5: Run integration tests
-  - name: 'gcr.io/$gen-lang-client-0503649694/interview-copilot-api:staging-$COMMIT_SHA'
+  - name: 'gcr.io/$PROJECT_ID/interview-copilot-api:staging-$COMMIT_SHA'
     id: 'integration-tests'
     entrypoint: 'python'
     args: ['-m', 'pytest', 'tests/integration/', '-v']
@@ -61,7 +61,7 @@ steps:
       - 'run'
       - 'deploy'
       - 'interview-copilot-api-staging'
-      - '--image=gcr.io/$gen-lang-client-0503649694/interview-copilot-api:staging-$COMMIT_SHA'
+      - '--image=gcr.io/$PROJECT_ID/interview-copilot-api:staging-$COMMIT_SHA'
       - '--region=us-central1'
       - '--platform=managed'
       - '--allow-unauthenticated'
@@ -73,6 +73,7 @@ steps:
       - '--max-instances=3'
       - '--min-instances=0'
       - '--timeout=300'
+      - '--port=8002'
     waitFor: ['integration-tests']
 
   # Step 7: Deploy UI to Cloud Run (Staging)
@@ -83,7 +84,7 @@ steps:
       - 'run'
       - 'deploy'
       - 'interview-copilot-ui-staging'
-      - '--image=gcr.io/$gen-lang-client-0503649694/interview-copilot-ui:staging-$COMMIT_SHA'
+      - '--image=gcr.io/$PROJECT_ID/interview-copilot-ui:staging-$COMMIT_SHA'
       - '--region=us-central1'
       - '--platform=managed'
       - '--allow-unauthenticated'
@@ -93,22 +94,23 @@ steps:
       - '--max-instances=2'
       - '--min-instances=0'
       - '--timeout=300'
+      - '--port=8501'
     waitFor: ['deploy-api-staging']
 
 # Substitution variables
 substitutions:
   _CLOUD_SQL_INSTANCE_STAGING: 'gen-lang-client-0503649694:us-west1:interview-copilot'
-  _CLOUD_RUN_SUFFIX: 'REPLACE_WITH_YOUR_CLOUD_RUN_SUFFIX'
+  _CLOUD_RUN_SUFFIX: 'REPLACE_WITH_NEW_US_CENTRAL1_SUFFIX'
 
 # Build timeout
 timeout: '1800s'
 
 # Images to be pushed to Container Registry
 images:
-  - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-api:staging-$COMMIT_SHA'
-  - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-api:staging-latest'
-  - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-ui:staging-$COMMIT_SHA'
-  - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-ui:staging-latest'
+  - 'gcr.io/$PROJECT_ID/interview-copilot-api:staging-$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/interview-copilot-api:staging-latest'
+  - 'gcr.io/$PROJECT_ID/interview-copilot-ui:staging-$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/interview-copilot-ui:staging-latest'
 
 # Build options
 options:

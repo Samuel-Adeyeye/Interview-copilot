@@ -73,6 +73,7 @@ steps:
       - '--max-instances=10'
       - '--min-instances=1'
       - '--timeout=300'
+      - '--port=8002'
     waitFor: ['integration-tests']
 
   # Step 7: Deploy UI to Cloud Run (Production)
@@ -93,12 +94,13 @@ steps:
       - '--max-instances=5'
       - '--min-instances=1'
       - '--timeout=300'
+      - '--port=8501'
     waitFor: ['deploy-api-prod']
 
 # Substitution variables
 substitutions:
-  _CLOUD_SQL_INSTANCE_PROD: 'PROJECT_ID:REGION:interview-copilot-db-prod'
-  _CLOUD_RUN_SUFFIX: 'REPLACE_WITH_YOUR_CLOUD_RUN_SUFFIX'
+  _CLOUD_SQL_INSTANCE_PROD: 'gen-lang-client-0503649694:us-central1:interview-copilot-prod'
+  _CLOUD_RUN_SUFFIX: 'REPLACE_WITH_NEW_US_CENTRAL1_SUFFIX'
 
 # Build timeout
 timeout: '1800s'
