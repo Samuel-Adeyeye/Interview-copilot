@@ -69,7 +69,10 @@ if 'evaluation_results' not in st.session_state:
 def get_client():
     """Get or create API client"""
     try:
-        return InterviewCoPilotSyncClient(base_url="http://localhost:8002", timeout=60.0)
+        # Get API URL from environment variable, fallback to localhost for local development
+        api_url = os.getenv("API_BASE_URL", "http://localhost:8002")
+        st.info(f"Connecting to API: {api_url}")
+        return InterviewCoPilotSyncClient(base_url=api_url, timeout=60.0)
     except Exception as e:
         st.error(f"Failed to initialize API client: {e}")
         return None
