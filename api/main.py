@@ -31,8 +31,9 @@ from memory.memory_bank import MemoryBank
 from memory.session_service import InMemorySessionService
 from memory.persistent_session_service import PersistentSessionService
 from memory.adk.session_service import create_adk_session_service, ADKSessionService
-from tools.search_tool import create_search_tool
-from tools.code_exec_tool import create_code_exec_tool
+# Legacy tools removed - have LangChain dependencies
+# from tools.search_tool import create_search_tool
+# from tools.code_exec_tool import create_code_exec_tool
 from tools.question_bank import QuestionBank
 from services.observability import ObservabilityService, RequestTracingMiddleware, RateLimitMiddleware
 from middleware.error_handler import error_handler_middleware

@@ -7,12 +7,15 @@ from unittest.mock import Mock, AsyncMock, MagicMock
 from typing import Dict, Any
 import os
 from datetime import datetime
+from fastapi.testclient import TestClient
 
 # Mock external API keys for testing
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("TAVILY_API_KEY", "test-tavily-key")
 os.environ.setdefault("JUDGE0_API_KEY", "test-judge0-key")
 os.environ.setdefault("GOOGLE_API_KEY", "test-google-key")  # For ADK
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("TESTING", "true")
 
 
 @pytest.fixture(scope="session")
@@ -21,6 +24,21 @@ def event_loop():
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
+
+
+@pytest.fixture(scope="session")
+def app():
+    """Create FastAPI app instance for testing"""
+    from api.main import app
+    return app
+
+
+@pytest.fixture
+def client(app):
+    """Create TestClient that doesn't require running server.
+    This is the preferred way to test FastAPI endpoints without needing
+    a live server running on a specific port."""
+    return TestClient(app)
 
 
 @pytest.fixture
@@ -58,6 +76,21 @@ def mock_gemini_model():
     model.model = "gemini-2.5-flash-lite"
     model.temperature = 0.7
     return model
+
+
+@pytest.fixture
+def mock_adk_agent():
+    """Mock ADK agent for testing"""
+    mock = AsyncMock()
+    mock.run.return_value = {
+        "status": "success",
+        "result": "Test result",
+        "data": {
+            "company_overview": "Mock overview",
+            "tech_stack": ["Python", "FastAPI"]
+        }
+    }
+    return mock
 
 
 @pytest.fixture
@@ -102,10 +135,27 @@ def mock_session_service():
 def mock_adk_session_service():
     """Mock ADK Session Service for testing"""
     service = Mock()
-    service.create_session = AsyncMock()
-    service.get_session = AsyncMock()
+    service.create_session = AsyncMock(return_value={
+        "session_id": "test-session-id",
+        "created_at": datetime.utcnow().isoformat()
+    })
+    service.get_session = AsyncMock(return_value={
+        "session_id": "test-session-id",
+        "user_id": "test-user",
+        "state": {}
+    })
     service.save_session = AsyncMock()
     service.delete_session = AsyncMock()
+    return service
+
+
+@pytest.fixture
+def mock_adk_memory_service():
+    """Mock ADK MemoryService for testing"""
+    service = Mock()
+    service.store = AsyncMock(return_value=True)
+    service.retrieve = AsyncMock(return_value=[])
+    service.search = AsyncMock(return_value=[])
     return service
 
 
@@ -251,3 +301,22 @@ def mock_judge0_response():
         "time": "0.1",
         "memory": 1000
     }
+
+
+@pytest.fixture(autouse=True)
+def mock_external_services(monkeypatch):
+    """Automatically mock external services for all tests to prevent
+    real API calls during testing"""
+    # Ensure test environment
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("TESTING", "true")
+    
+    # Mock API keys are already set above, but ensure they're in place
+    if not os.getenv("GOOGLE_API_KEY"):
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
+    if not os.getenv("OPENAI_API_KEY"):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    if not os.getenv("TAVILY_API_KEY"):
+        monkeypatch.setenv("TAVILY_API_KEY", "test-tavily-key")
+    if not os.getenv("JUDGE0_API_KEY"):
+        monkeypatch.setenv("JUDGE0_API_KEY", "test-judge0-key")

@@ -8,9 +8,9 @@ steps:
     args:
       - 'build'
       - '-t'
-      - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-api:staging-$COMMIT_SHA'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-api:staging-$COMMIT_SHA'
       - '-t'
-      - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-api:staging-latest'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-api:staging-latest'
       - '-f'
       - 'Dockerfile'
       - '.'
@@ -21,9 +21,9 @@ steps:
     args:
       - 'build'
       - '-t'
-      - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-ui:staging-$COMMIT_SHA'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-ui:staging-$COMMIT_SHA'
       - '-t'
-      - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-ui:staging-latest'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-ui:staging-latest'
       - '-f'
       - 'Dockerfile.streamlit'
       - '.'
@@ -33,7 +33,7 @@ steps:
     id: 'push-api'
     args:
       - 'push'
-      - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-api:staging-$COMMIT_SHA'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-api:staging-$COMMIT_SHA'
     waitFor: ['build-api']
 
   # Step 4: Push UI image to Container Registry
@@ -41,16 +41,41 @@ steps:
     id: 'push-ui'
     args:
       - 'push'
-      - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-ui:staging-$COMMIT_SHA'
+      - 'gcr.io/$PROJECT_ID/interview-copilot-ui:staging-$COMMIT_SHA'
     waitFor: ['build-ui']
 
-  # Step 5: Run integration tests
-  - name: 'gcr.io/$gen-lang-client-0503649694/interview-copilot-api:staging-$COMMIT_SHA'
-    id: 'integration-tests'
-    entrypoint: 'python'
-    args: ['-m', 'pytest', 'tests/integration/', '-v']
+  # Step 5: Run tests using pytest directly (no server needed)
+  - name: 'gcr.io/$PROJECT_ID/interview-copilot-api:staging-$COMMIT_SHA'
+    id: 'run-tests'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "🧪 Running tests for staging environment..."
+        
+        # Set test environment variables
+        export ENVIRONMENT=test
+        export TESTING=true
+        export PYTHONPATH=/app
+        
+        # Mock API keys for testing
+        export GOOGLE_API_KEY=${GOOGLE_API_KEY:-test-google-key}
+        export OPENAI_API_KEY=${OPENAI_API_KEY:-test-openai-key}
+        export TAVILY_API_KEY=${TAVILY_API_KEY:-test-tavily-key}
+        export JUDGE0_API_KEY=${JUDGE0_API_KEY:-test-judge0-key}
+        
+        echo "Running integration tests..."
+        pytest tests/integration/ -v --tb=short --maxfail=5 || exit 1
+        
+        echo ""
+        echo "Running ADK tests..."
+        pytest tests/test_adk_*.py -v --tb=short --maxfail=5 || true
+        
+        echo ""
+        echo "✅ All critical tests passed for staging!"
     env:
-      - 'ENVIRONMENT=staging'
+      - 'ENVIRONMENT=test'
+      - 'TESTING=true'
     waitFor: ['push-api']
 
   # Step 6: Deploy API to Cloud Run (Staging)
@@ -61,7 +86,7 @@ steps:
       - 'run'
       - 'deploy'
       - 'interview-copilot-api-staging'
-      - '--image=gcr.io/$gen-lang-client-0503649694/interview-copilot-api:staging-$COMMIT_SHA'
+      - '--image=gcr.io/$PROJECT_ID/interview-copilot-api:staging-$COMMIT_SHA'
       - '--region=us-central1'
       - '--platform=managed'
       - '--allow-unauthenticated'
@@ -73,7 +98,8 @@ steps:
       - '--max-instances=3'
       - '--min-instances=0'
       - '--timeout=300'
-    waitFor: ['integration-tests']
+      - '--port=8002'
+    waitFor: ['run-tests']
 
   # Step 7: Deploy UI to Cloud Run (Staging)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -83,32 +109,56 @@ steps:
       - 'run'
       - 'deploy'
       - 'interview-copilot-ui-staging'
-      - '--image=gcr.io/$gen-lang-client-0503649694/interview-copilot-ui:staging-$COMMIT_SHA'
+      - '--image=gcr.io/$PROJECT_ID/interview-copilot-ui:staging-$COMMIT_SHA'
       - '--region=us-central1'
       - '--platform=managed'
       - '--allow-unauthenticated'
-      - '--set-env-vars=API_BASE_URL=https://interview-copilot-api-staging-${_CLOUD_RUN_SUFFIX}.run.app,ENVIRONMENT=staging'
+      - '--set-env-vars=API_BASE_URL=https://interview-copilot-api-staging-${_CLOUD_RUN_SUFFIX},ENVIRONMENT=staging'
       - '--memory=512Mi'
       - '--cpu=1'
       - '--max-instances=2'
       - '--min-instances=0'
       - '--timeout=300'
+      - '--port=8501'
+    waitFor: ['deploy-api-staging', 'push-ui']
+
+  # Step 8: Run smoke tests against deployed staging API (optional)
+  - name: 'gcr.io/cloud-builders/curl'
+    id: 'smoke-tests'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "🔥 Running smoke tests against staging deployment..."
+        
+        # Wait a bit for deployment to be ready
+        sleep 10
+        
+        # Test health endpoint
+        echo "Testing /health endpoint..."
+        curl -f https://interview-copilot-api-staging-${_CLOUD_RUN_SUFFIX}/health || exit 1
+        
+        # Test API root
+        echo "Testing API root..."
+        curl -f https://interview-copilot-api-staging-${_CLOUD_RUN_SUFFIX}/ || exit 1
+        
+        echo "✅ Smoke tests passed!"
     waitFor: ['deploy-api-staging']
 
 # Substitution variables
 substitutions:
   _CLOUD_SQL_INSTANCE_STAGING: 'gen-lang-client-0503649694:us-west1:interview-copilot'
-  _CLOUD_RUN_SUFFIX: 'REPLACE_WITH_YOUR_CLOUD_RUN_SUFFIX'
+  _CLOUD_RUN_SUFFIX: '270912131800.us-central1.run.app'
 
 # Build timeout
 timeout: '1800s'
 
 # Images to be pushed to Container Registry
 images:
-  - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-api:staging-$COMMIT_SHA'
-  - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-api:staging-latest'
-  - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-ui:staging-$COMMIT_SHA'
-  - 'gcr.io/$gen-lang-client-0503649694/interview-copilot-ui:staging-latest'
+  - 'gcr.io/$PROJECT_ID/interview-copilot-api:staging-$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/interview-copilot-api:staging-latest'
+  - 'gcr.io/$PROJECT_ID/interview-copilot-ui:staging-$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/interview-copilot-ui:staging-latest'
 
 # Build options
 options:

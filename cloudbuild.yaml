@@ -44,13 +44,31 @@ steps:
       - 'gcr.io/$PROJECT_ID/interview-copilot-ui:$COMMIT_SHA'
     waitFor: ['build-ui']
 
-  # Step 5: Run integration tests
+  # Step 5: Run tests using pytest directly (no server needed)
   - name: 'gcr.io/$PROJECT_ID/interview-copilot-api:$COMMIT_SHA'
-    id: 'integration-tests'
-    entrypoint: 'python'
-    args: ['-m', 'pytest', 'tests/integration/', '-v']
+    id: 'run-tests'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "Running tests with pytest..."
+        
+        # Set test environment variables
+        export ENVIRONMENT=test
+        export TESTING=true
+        export PYTHONPATH=/app
+        
+        # Run tests using pytest (TestClient doesn't need running server)
+        pytest tests/ -v --tb=short \
+          --ignore=tests/e2e/ \
+          -m "not requires_server" \
+          --maxfail=5 \
+          || exit 1
+        
+        echo "✅ All tests passed!"
     env:
       - 'ENVIRONMENT=test'
+      - 'TESTING=true'
     waitFor: ['push-api']
 
   # Step 6: Deploy API to Cloud Run (Production)
@@ -73,7 +91,8 @@ steps:
       - '--max-instances=10'
       - '--min-instances=1'
       - '--timeout=300'
-    waitFor: ['integration-tests']
+      - '--port=8002'
+    waitFor: ['run-tests']
 
   # Step 7: Deploy UI to Cloud Run (Production)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -87,18 +106,19 @@ steps:
       - '--region=us-central1'
       - '--platform=managed'
       - '--allow-unauthenticated'
-      - '--set-env-vars=API_BASE_URL=https://interview-copilot-api-prod-${_CLOUD_RUN_SUFFIX}.run.app,ENVIRONMENT=production'
+      - '--set-env-vars=API_BASE_URL=https://interview-copilot-api-prod-${_CLOUD_RUN_SUFFIX},ENVIRONMENT=production'
       - '--memory=1Gi'
       - '--cpu=1'
       - '--max-instances=5'
       - '--min-instances=1'
       - '--timeout=300'
+      - '--port=8501'
     waitFor: ['deploy-api-prod']
 
 # Substitution variables
 substitutions:
-  _CLOUD_SQL_INSTANCE_PROD: 'PROJECT_ID:REGION:interview-copilot-db-prod'
-  _CLOUD_RUN_SUFFIX: 'REPLACE_WITH_YOUR_CLOUD_RUN_SUFFIX'
+  _CLOUD_SQL_INSTANCE_PROD: 'gen-lang-client-0503649694:us-central1:interview-copilot-prod'
+  _CLOUD_RUN_SUFFIX: '270912131800.us-central1.run.app'
 
 # Build timeout
 timeout: '1800s'
