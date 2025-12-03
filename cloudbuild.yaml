@@ -106,7 +106,7 @@ steps:
       - '--region=us-central1'
       - '--platform=managed'
       - '--allow-unauthenticated'
-      - '--set-env-vars=API_BASE_URL=https://interview-copilot-api-prod-${_CLOUD_RUN_SUFFIX}.run.app,ENVIRONMENT=production'
+      - '--set-env-vars=API_BASE_URL=https://interview-copilot-api-prod-${_CLOUD_RUN_SUFFIX},ENVIRONMENT=production'
       - '--memory=1Gi'
       - '--cpu=1'
       - '--max-instances=5'

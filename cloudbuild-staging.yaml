@@ -113,7 +113,7 @@ steps:
       - '--region=us-central1'
       - '--platform=managed'
       - '--allow-unauthenticated'
-      - '--set-env-vars=API_BASE_URL=https://interview-copilot-api-staging-${_CLOUD_RUN_SUFFIX}.run.app,ENVIRONMENT=staging'
+      - '--set-env-vars=API_BASE_URL=https://interview-copilot-api-staging-${_CLOUD_RUN_SUFFIX},ENVIRONMENT=staging'
       - '--memory=512Mi'
       - '--cpu=1'
       - '--max-instances=2'
@@ -136,11 +136,11 @@ steps:
         
         # Test health endpoint
         echo "Testing /health endpoint..."
-        curl -f https://interview-copilot-api-staging-${_CLOUD_RUN_SUFFIX}.run.app/health || exit 1
+        curl -f https://interview-copilot-api-staging-${_CLOUD_RUN_SUFFIX}/health || exit 1
         
         # Test API root
         echo "Testing API root..."
-        curl -f https://interview-copilot-api-staging-${_CLOUD_RUN_SUFFIX}.run.app/ || exit 1
+        curl -f https://interview-copilot-api-staging-${_CLOUD_RUN_SUFFIX}/ || exit 1
         
         echo "✅ Smoke tests passed!"
     waitFor: ['deploy-api-staging']
