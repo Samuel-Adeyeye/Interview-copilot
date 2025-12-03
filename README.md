@@ -374,6 +374,12 @@ The ADK migration is **complete**. Both legacy (LangChain) and new (ADK) impleme
 - **ADK Endpoints**: `/api/v2/adk/*` (recommended)
 - **Legacy Endpoints**: `/api/v1/*` (deprecated, will be removed)
 
+### Recent Updates (Dec 2025)
+
+- **Deployment**: Fixed Google Cloud Run build configuration (SSL certificate issues).
+- **UI**: Improved streaming response handling in Streamlit UI (fixed buffering and error handling).
+- **Stability**: Enhanced error reporting for ADK agents.
+
 ## 🛠️ Development
 
 ### Adding New Agents
@@ -432,6 +438,6 @@ See [ADK Installation Troubleshooting](docs/ADK_INSTALLATION_TROUBLESHOOTING.md)
 
 ---
 
-**Last Updated**: 2025-11-27  
-**Version**: 2.0 (ADK Migration Complete)
+**Last Updated**: 2025-12-03
+**Version**: 2.0.1 (Deployment Fixes)
 
