@@ -83,7 +83,7 @@ async def run_research(
     """
     Run research agent to build company prep packet
     """
-    session = session_service.get_session(request.session_id)
+    session = await session_service.get_session(request.session_id)
     if not session:
         raise SessionNotFoundError(session_id=request.session_id)
     

@@ -36,10 +36,10 @@ async def create_session(
     try:
         session_id = str(uuid.uuid4())
         
-        session = session_service.create_session(
+        session = await session_service.create_session(
             session_id=session_id,
             user_id=request.user_id,
-            metadata=request.metadata or {}
+            metadata=request.metadata
         )
         
         logger.info(f"Created session {session_id} for user {request.user_id}")
@@ -60,7 +60,7 @@ async def get_session(
     Retrieve session by ID
     """
     try:
-        session = session_service.get_session(session_id)
+        session = await session_service.get_session(session_id)
         
         if not session:
             raise SessionNotFoundError(session_id=session_id)
@@ -85,7 +85,7 @@ async def pause_session(
     Pause a running session (creates checkpoint)
     """
     try:
-        session = session_service.get_session(session_id)
+        session = await session_service.get_session(session_id)
         if not session:
             raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
         
@@ -140,7 +140,7 @@ async def get_session_summary(
     Get comprehensive session summary
     """
     try:
-        session = session_service.get_session(session_id)
+        session = await session_service.get_session(session_id)
         if not session:
             raise SessionNotFoundError(session_id=session_id)
         
