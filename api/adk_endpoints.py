@@ -77,7 +77,7 @@ async def run_research_adk(
             # Try to get from session service
             from api.main import app_state
             if app_state.session_service:
-                session = app_state.session_service.get_session(request.session_id)
+                session = await app_state.session_service.get_session(request.session_id)
                 if session:
                     user_id = session.get("user_id")
             if not user_id:

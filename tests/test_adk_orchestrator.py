@@ -5,6 +5,7 @@ Tests for ADK Orchestrator
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from typing import Dict, Any
+from google.adk.agents import BaseAgent
 
 
 @pytest.mark.unit
@@ -23,6 +24,9 @@ class TestADKOrchestrator:
         """Test creating ADK orchestrator with SequentialAgent"""
         from agents.adk.orchestrator import create_adk_orchestrator
         
+        # Configure mock to pass Pydantic validation
+        mock_sequential.return_value = MagicMock(spec=BaseAgent)
+        
         orchestrator = create_adk_orchestrator(use_sequential=True)
         assert orchestrator is not None
         assert orchestrator.workflow is not None
@@ -39,6 +43,9 @@ class TestADKOrchestrator:
     ):
         """Test creating ADK orchestrator with LLM-based routing"""
         from agents.adk.orchestrator import create_adk_orchestrator
+        
+        # Configure mock to pass Pydantic validation
+        mock_llm_agent.return_value = MagicMock(spec=BaseAgent)
         
         orchestrator = create_adk_orchestrator(use_sequential=False)
         assert orchestrator is not None
@@ -63,6 +70,9 @@ class TestADKOrchestrator:
         mock_runner_instance = Mock()
         mock_runner_instance.run_async = AsyncMock(return_value=[mock_event])
         mock_runner.return_value = mock_runner_instance
+        
+        # Configure mock to pass Pydantic validation
+        mock_sequential.return_value = MagicMock(spec=BaseAgent)
         
         orchestrator = create_adk_orchestrator(use_sequential=True)
         
@@ -96,6 +106,9 @@ class TestADKOrchestrator:
         mock_runner_instance = Mock()
         mock_runner_instance.run_async = AsyncMock(return_value=[mock_event])
         mock_runner.return_value = mock_runner_instance
+        
+        # Configure mock to pass Pydantic validation
+        mock_sequential.return_value = MagicMock(spec=BaseAgent)
         
         orchestrator = create_adk_orchestrator(use_sequential=True)
         

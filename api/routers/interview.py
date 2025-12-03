@@ -48,7 +48,7 @@ async def start_mock_interview(
     """
     Start a mock technical interview session
     """
-    session = session_service.get_session(request.session_id)
+    session = await session_service.get_session(request.session_id)
     if not session:
         raise SessionNotFoundError(session_id=request.session_id)
     
@@ -129,7 +129,7 @@ async def submit_code(
     """
     Submit code for evaluation
     """
-    session = session_service.get_session(request.session_id)
+    session = await session_service.get_session(request.session_id)
     if not session:
         raise SessionNotFoundError(session_id=request.session_id)
     

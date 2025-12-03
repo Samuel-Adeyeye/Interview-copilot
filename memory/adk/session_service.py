@@ -62,43 +62,7 @@ class ADKSessionService:
             self.service = InMemorySessionService()
             logger.info("✅ Using ADK InMemorySessionService")
     
-    def create_session(
-        self,
-        session_id: str,
-        user_id: str,
-        metadata: Optional[Dict] = None
-    ) -> Dict:
-        """Create a new session (synchronous wrapper)"""
-        import asyncio
-        try:
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # In async context, use cache or create placeholder
-                    if not hasattr(self, 'sessions'):
-                        self.sessions = {}
-                    if session_id not in self.sessions:
-                        self.sessions[session_id] = {
-                            "session_id": session_id,
-                            "user_id": user_id,
-                            "state": "created",
-                            "agent_states": {},
-                            "artifacts": [],
-                            "metadata": metadata or {},
-                            "created_at": datetime.utcnow().isoformat(),
-                            "updated_at": datetime.utcnow().isoformat()
-                        }
-                    return self.sessions[session_id]
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            return loop.run_until_complete(self._create_session_async(session_id, user_id, metadata))
-        except Exception as e:
-            logger.error(f"Error creating session: {e}")
-            raise
-    
-    async def _create_session_async(
+    async def create_session(
         self,
         session_id: str,
         user_id: str,
@@ -160,39 +124,15 @@ class ADKSessionService:
             "updated_at": datetime.utcnow().isoformat()
         }
     
-    def update_agent_state(self, session_id: str, agent_name: str, state: Dict):
+    async def update_agent_state(self, session_id: str, agent_name: str, state: Dict):
         """
-        Update state for a specific agent (synchronous wrapper).
+        Update state for a specific agent.
         
         Args:
             session_id: Session identifier
             agent_name: Agent name
             state: State dictionary to update
         """
-        import asyncio
-        try:
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # In async context, update cache immediately
-                    if hasattr(self, 'sessions') and session_id in self.sessions:
-                        if 'agent_states' not in self.sessions[session_id]:
-                            self.sessions[session_id]['agent_states'] = {}
-                        self.sessions[session_id]['agent_states'][agent_name] = state
-                        self.sessions[session_id]['updated_at'] = datetime.utcnow().isoformat()
-                    # Schedule async update
-                    asyncio.create_task(self._update_agent_state_async(session_id, agent_name, state))
-                    return
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            loop.run_until_complete(self._update_agent_state_async(session_id, agent_name, state))
-        except Exception as e:
-            logger.error(f"Error updating agent state: {e}")
-    
-    async def _update_agent_state_async(self, session_id: str, agent_name: str, state: Dict):
-        """Internal async method for updating agent state"""
         try:
             session = await self.service.get_session(
                 app_name=self.app_name,
@@ -223,34 +163,7 @@ class ADKSessionService:
         except Exception as e:
             logger.error(f"Error updating agent state: {e}")
     
-    def add_artifact(self, session_id: str, artifact_type: str, payload: Any):
-        """Add artifact (synchronous wrapper)"""
-        import asyncio
-        try:
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # Update cache immediately
-                    if hasattr(self, 'sessions') and session_id in self.sessions:
-                        if 'artifacts' not in self.sessions[session_id]:
-                            self.sessions[session_id]['artifacts'] = []
-                        self.sessions[session_id]['artifacts'].append({
-                            "type": artifact_type,
-                            "payload": payload,
-                            "timestamp": datetime.utcnow().isoformat()
-                        })
-                    # Schedule async update
-                    asyncio.create_task(self._add_artifact_async(session_id, artifact_type, payload))
-                    return
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            loop.run_until_complete(self._add_artifact_async(session_id, artifact_type, payload))
-        except Exception as e:
-            logger.error(f"Error adding artifact: {e}")
-    
-    async def _add_artifact_async(self, session_id: str, artifact_type: str, payload: Any):
+    async def add_artifact(self, session_id: str, artifact_type: str, payload: Any):
         """
         Add an artifact to the session.
         
@@ -360,9 +273,9 @@ class ADKSessionService:
         except Exception as e:
             logger.error(f"Error updating session state: {e}")
     
-    def get_session(self, session_id: str) -> Optional[Dict]:
+    async def get_session(self, session_id: str) -> Optional[Dict]:
         """
-        Retrieve session (synchronous wrapper for async method).
+        Retrieve session.
         
         Args:
             session_id: Session identifier
@@ -370,35 +283,6 @@ class ADKSessionService:
         Returns:
             Session dictionary or None
         """
-        import asyncio
-        try:
-            # Try to get the current event loop
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # If we're in an async context, we need to use a different approach
-                    # For now, use the cached sessions if available
-                    if hasattr(self, 'sessions') and session_id in self.sessions:
-                        return self.sessions[session_id]
-                    # Otherwise, we'll need to handle this differently
-                    logger.warning(f"get_session called from async context for {session_id}, using cache")
-                    return self.sessions.get(session_id) if hasattr(self, 'sessions') else None
-            except RuntimeError:
-                # No event loop, create a new one
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            # Run the async method
-            return loop.run_until_complete(self._get_session_async(session_id))
-        except Exception as e:
-            logger.error(f"Error getting session: {e}")
-            # Fallback to cache if available
-            if hasattr(self, 'sessions'):
-                return self.sessions.get(session_id)
-            return None
-    
-    async def _get_session_async(self, session_id: str) -> Optional[Dict]:
-        """Internal async method for getting session"""
         try:
             session = await self.service.get_session(
                 app_name=self.app_name,
