@@ -14,7 +14,7 @@ class InMemorySessionService:
     def __init__(self):
         self.sessions: Dict[str, Dict] = {}
     
-    def create_session(self, session_id: str, user_id: str, metadata: Dict = None) -> Dict:
+    def create_session(self, session_id: str, user_id: str, app_name: str = None, metadata: Dict = None) -> Dict:
         """Create a new session"""
         session = {
             "session_id": session_id,
@@ -75,7 +75,7 @@ class InMemorySessionService:
             self.sessions[session_id]["state"] = SessionState.COMPLETED
             self.sessions[session_id]["completed_at"] = datetime.utcnow().isoformat()
     
-    def get_session(self, session_id: str) -> Optional[Dict]:
+    def get_session(self, session_id: str, app_name: str = None, user_id: str = None) -> Optional[Dict]:
         """Retrieve session"""
         return self.sessions.get(session_id)
     
