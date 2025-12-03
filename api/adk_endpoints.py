@@ -89,26 +89,30 @@ async def run_research_adk(
         async def generate():
             """Generate streaming response"""
             full_response = ""
-            async for event in adk_app.run_research(
-                user_id=user_id,
-                session_id=request.session_id,
-                company_name=request.company_name,
-                job_description=request.job_description
-            ):
-                if event.content and event.content.parts:
-                    for part in event.content.parts:
-                        if hasattr(part, 'text') and part.text:
-                            text = part.text
-                            full_response += text
-                            yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
-                        elif hasattr(part, 'function_call'):
-                            # Log function calls but don't break the stream
-                            logger.info(f"Research agent calling tool: {part.function_call.name}")
-                            # Optional: yield a progress event
-                            # yield f"data: {json.dumps({'text': '', 'type': 'progress', 'detail': f'Using tool: {part.function_call.name}'})}\n\n"
-            
-            # Final response
-            yield f"data: {json.dumps({'text': full_response, 'type': 'complete'})}\n\n"
+            try:
+                async for event in adk_app.run_research(
+                    user_id=user_id,
+                    session_id=request.session_id,
+                    company_name=request.company_name,
+                    job_description=request.job_description
+                ):
+                    if event.content and event.content.parts:
+                        for part in event.content.parts:
+                            if hasattr(part, 'text') and part.text:
+                                text = part.text
+                                full_response += text
+                                yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
+                            elif hasattr(part, 'function_call'):
+                                # Log function calls but don't break the stream
+                                logger.info(f"Research agent calling tool: {part.function_call.name}")
+                                # Optional: yield a progress event
+                                # yield f"data: {json.dumps({'text': '', 'type': 'progress', 'detail': f'Using tool: {part.function_call.name}'})}\n\n"
+                
+                # Final response
+                yield f"data: {json.dumps({'text': full_response, 'type': 'complete'})}\n\n"
+            except Exception as e:
+                logger.error(f"Streaming error in research: {e}", exc_info=True)
+                yield f"data: {json.dumps({'text': str(e), 'type': 'error'})}\n\n"
         
         return StreamingResponse(
             generate(),
@@ -116,6 +120,7 @@ async def run_research_adk(
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
             }
         )
         
@@ -219,6 +224,7 @@ async def run_technical_adk(
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
             }
         )
         
@@ -266,22 +272,26 @@ async def run_workflow_adk(
         async def generate():
             """Generate streaming response"""
             full_response = ""
-            async for event in adk_app.run_workflow(
-                user_id=request.user_id,
-                session_id=request.session_id,
-                message=workflow_message
-            ):
-                if event.content and event.content.parts:
-                    for part in event.content.parts:
-                        if hasattr(part, 'text') and part.text:
-                            text = part.text
-                            full_response += text
-                            yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
-                        elif hasattr(part, 'function_call'):
-                            logger.info(f"Workflow agent calling tool: {part.function_call.name}")
-            
-            # Final response
-            yield f"data: {json.dumps({'text': full_response, 'type': 'complete'})}\n\n"
+            try:
+                async for event in adk_app.run_workflow(
+                    user_id=request.user_id,
+                    session_id=request.session_id,
+                    message=workflow_message
+                ):
+                    if event.content and event.content.parts:
+                        for part in event.content.parts:
+                            if hasattr(part, 'text') and part.text:
+                                text = part.text
+                                full_response += text
+                                yield f"data: {json.dumps({'text': text, 'type': 'chunk'})}\n\n"
+                            elif hasattr(part, 'function_call'):
+                                logger.info(f"Workflow agent calling tool: {part.function_call.name}")
+                
+                # Final response
+                yield f"data: {json.dumps({'text': full_response, 'type': 'complete'})}\n\n"
+            except Exception as e:
+                logger.error(f"Streaming error in workflow: {e}", exc_info=True)
+                yield f"data: {json.dumps({'text': str(e), 'type': 'error'})}\n\n"
         
         return StreamingResponse(
             generate(),
@@ -289,6 +299,7 @@ async def run_workflow_adk(
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
             }
         )
         
