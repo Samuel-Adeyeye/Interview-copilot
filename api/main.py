@@ -28,8 +28,6 @@ except ImportError as e:
     raise
 
 from memory.memory_bank import MemoryBank
-from memory.session_service import InMemorySessionService
-from memory.persistent_session_service import PersistentSessionService
 from memory.adk.session_service import create_adk_session_service, ADKSessionService
 # Legacy tools removed - have LangChain dependencies
 # from tools.search_tool import create_search_tool
@@ -69,38 +67,29 @@ async def lifespan(app: FastAPI):
         # Initialize core services
         logger.info("Initializing core services...")
         
-        # Initialize session service with persistence if enabled
-        if settings.SESSION_PERSISTENCE_ENABLED:
-            logger.info(f"Initializing persistent session service (type: {settings.SESSION_STORAGE_TYPE})...")
-            
+        # Initialize session service - always use ADK-compatible service
+        if settings.SESSION_PERSISTENCE_ENABLED and settings.SESSION_STORAGE_TYPE == "database":
             # Use ADK DatabaseSessionService for PostgreSQL
-            if settings.SESSION_STORAGE_TYPE == "database":
-                # Use DATABASE_URL for PostgreSQL connection
-                db_url = settings.DATABASE_URL
-                if not db_url:
-                    raise ValueError("DATABASE_URL is required when SESSION_STORAGE_TYPE=database")
-                
-                logger.info(f"Using ADK DatabaseSessionService with PostgreSQL: {db_url.split('@')[1] if '@' in db_url else 'configured'}")
-                app_state.session_service = create_adk_session_service(
-                    use_database=True,
-                    db_url=db_url,
-                    app_name="interview_copilot"
-                )
-                logger.info("✅ ADK DatabaseSessionService initialized (PostgreSQL)")
-            else:
-                # Use PersistentSessionService for file or sqlite
-                app_state.session_service = PersistentSessionService(
-                    storage_type=settings.SESSION_STORAGE_TYPE,
-                    storage_path=settings.SESSION_STORAGE_PATH,
-                    expiration_hours=settings.SESSION_EXPIRATION_HOURS,
-                    auto_save=True
-                )
-                stats = app_state.session_service.get_storage_stats()
-                logger.info(f"✅ Persistent session service initialized: {stats['total_sessions']} sessions loaded")
+            db_url = settings.DATABASE_URL
+            if not db_url:
+                raise ValueError("DATABASE_URL is required when SESSION_STORAGE_TYPE=database")
+            
+            logger.info(f"Using ADK DatabaseSessionService with PostgreSQL: {db_url.split('@')[1] if '@' in db_url else 'configured'}")
+            app_state.session_service = create_adk_session_service(
+                use_database=True,
+                db_url=db_url,
+                app_name="interview_copilot"
+            )
+            logger.info("✅ ADK DatabaseSessionService initialized (PostgreSQL)")
         else:
-            logger.info("Initializing in-memory session service (persistence disabled)...")
-            app_state.session_service = InMemorySessionService()
-            logger.info("✅ In-memory session service initialized")
+            # Use ADK InMemorySessionService for all other cases
+            logger.info("Initializing ADK in-memory session service...")
+            app_state.session_service = create_adk_session_service(
+                use_database=False,
+                db_url=None,
+                app_name="interview_copilot"
+            )
+            logger.info("✅ ADK InMemorySessionService initialized")
         
         app_state.memory_bank = MemoryBank(persist_directory=settings.VECTOR_DB_PATH)
         app_state.observability = ObservabilityService()
@@ -175,7 +164,7 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Services stored in app state")
         
         # Start background cleanup task for session expiration
-        if isinstance(app_state.session_service, (PersistentSessionService, ADKSessionService)):
+        if isinstance(app_state.session_service, ADKSessionService):
             async def periodic_cleanup():
                 """Periodic cleanup of expired sessions"""
                 while True:
@@ -220,13 +209,8 @@ async def lifespan(app: FastAPI):
                 pass
             logger.info("✅ Background cleanup task cancelled")
         
-        # Save sessions before shutdown if using persistent service
-        if isinstance(app_state.session_service, PersistentSessionService):
-            logger.info("Saving sessions to persistent storage...")
-            app_state.session_service.force_save()
-            logger.info("✅ Sessions saved")
-        elif isinstance(app_state.session_service, ADKSessionService):
-            # ADK DatabaseSessionService handles persistence automatically
+        # ADK session service handles persistence automatically
+        if isinstance(app_state.session_service, ADKSessionService):
             logger.info("ADK session service uses automatic persistence")
         
         # Close any async resources
